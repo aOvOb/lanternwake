@@ -135,6 +135,17 @@
     }
   };
 
+  // 디버그 W키: 무기 8종의 Lv1과 Lv8을 하나씩 차례로 단독 장착한다
+  var dbgW = -1;
+  function dbgCycleWeapon() {
+    var g = LW.game;
+    dbgW = (dbgW + 1) % (LW.WEAPONS.length * 2);
+    var w = LW.makeWeapon(LW.WEAPONS[dbgW >> 1].id, 0);
+    w.lv = (dbgW & 1) ? w.def.maxLv : 1;
+    g.weapons = [w];
+    LW.player.recomputeStats();
+  }
+
   function handleKey(code) {
     var g = LW.game, st = g.state, lu = LW.levelup;
     if (LW.params.debug && code === 'F2') { ui.dbgOverlay = !ui.dbgOverlay; return; }
@@ -146,6 +157,7 @@
         if (code === 'KeyL') g.addXp(g.xpNeed - g.xp);
         else if (code === 'KeyT') g.time += 60;
         else if (code === 'KeyI') g.god = !g.god;
+        else if (code === 'KeyW') dbgCycleWeapon();
       }
     } else if (st === 'PAUSED') {
       if (code === 'Escape' || code === 'KeyP' || code === 'Enter') g.setState('PLAYING');
@@ -271,7 +283,10 @@
     var g = LW.game, i;
     for (i = 0; i < g.weapons.length; i++) {
       var w = g.weapons[i];
-      lines.push('슬롯' + i + ' ' + w.def.name + ' Lv' + w.lv + ' 누적피해 ' + Math.round(g.dmgBySlot[i]));
+      var L = LW.weaponLevel(w), txt = '';
+      for (var key in L) txt += ' ' + key + ' ' + (Math.round(L[key] * 100) / 100);
+      lines.push('슬롯' + i + ' ' + LW.weaponName(w) + ' Lv' + w.lv + ' 누적 ' + Math.round(g.dmgBySlot[i]));
+      lines.push('  ' + txt);
     }
     ctx.font = '10px monospace';
     ctx.textAlign = 'left';

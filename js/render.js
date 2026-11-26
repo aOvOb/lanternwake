@@ -317,12 +317,32 @@
     ctx.fillRect(P.x - bw / 2, P.y - 27, bw * ratio, 4);
   }
 
+  // 가시 원반: 회전하는 가시 원
+  function drawDisc(ctx, p) {
+    var rot = (p.maxLife - p.life) * 9, r = p.r, i;
+    ctx.beginPath();
+    for (i = 0; i < 16; i++) {
+      var a = rot + i * Math.PI / 8, rr = (i & 1) ? r * 0.62 : r * 1.15;
+      var px = p.x + Math.cos(a) * rr, py = p.y + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#7bd88f';
+    ctx.fill();
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = '#1d4a2a';
+    ctx.stroke();
+    ctx.fillStyle = '#1d4a2a';
+    circle(ctx, p.x, p.y, r * 0.3); ctx.fill();
+  }
+
   function drawProjectiles(ctx, l, r, t, b) {
     var items = LW.projectiles.items, n = LW.projectiles.n;
     ctx.lineCap = 'round';
     for (var i = 0; i < n; i++) {
       var p = items[i];
       if (p.x < l || p.x > r || p.y < t || p.y > b) continue;
+      if (p.kind === 1) { drawDisc(ctx, p); continue; }
       ctx.strokeStyle = '#ff7a2a';
       ctx.lineWidth = p.r * 0.8;
       ctx.beginPath();
@@ -333,6 +353,130 @@
       circle(ctx, p.x, p.y, p.r); ctx.fill();
       ctx.fillStyle = '#fff6d0';
       circle(ctx, p.x, p.y, p.r * 0.5); ctx.fill();
+    }
+  }
+
+  // 장판, 폭발, 예고, 번개 연출
+  var BLAST_FILL = ['255,154,60', '182,224,74', '230,60,60'];
+  function drawAreas(ctx, l, r, t, b) {
+    var items = LW.areas.items, n = LW.areas.n, K = LW.AREA, i;
+    for (i = 0; i < n; i++) {
+      var a = items[i];
+      var ext = a.r + 20;
+      if (a.x + ext < l || a.x - ext > r || a.y + ext < t || a.y - ext > b) continue;
+      var p = a.maxLife > 0 ? 1 - a.life / a.maxLife : 1;
+      if (p < 0) p = 0;
+      switch (a.kind) {
+        case K.POISON:
+          ctx.globalAlpha = Math.min(1, a.life / 0.4);
+          circle(ctx, a.x, a.y, a.r);
+          ctx.fillStyle = a.flag ? 'rgba(90,40,140,0.45)' : 'rgba(122,79,176,0.32)'; ctx.fill();
+          ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(185,140,240,0.7)'; ctx.stroke();
+          ctx.fillStyle = 'rgba(210,180,255,0.5)';
+          for (var q = 0; q < 3; q++) {
+            var ph = R.time * 1.3 + q * 2.1 + a.x * 0.01;
+            circle(ctx, a.x + Math.cos(ph * 2) * a.r * 0.5, a.y - ((ph % 1) - 0.5) * a.r * 0.8, 2.5);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          break;
+        case K.BLAST:
+          ctx.globalAlpha = (1 - p) * 0.7;
+          circle(ctx, a.x, a.y, a.r * (0.4 + 0.6 * p));
+          ctx.fillStyle = 'rgba(' + BLAST_FILL[a.flag] + ',0.55)'; ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(' + BLAST_FILL[a.flag] + ',1)'; ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        case K.SWING:
+          ctx.globalAlpha = (1 - p) * 0.8;
+          ctx.beginPath();
+          if (a.flag) {
+            ctx.arc(a.x, a.y, a.r * (0.5 + 0.5 * p), 0, TAU);
+            ctx.arc(a.x, a.y, a.r * 0.55 * (0.5 + 0.5 * p), 0, TAU, true);
+          } else {
+            var rr = a.r * (0.7 + 0.3 * p), half = 70 * Math.PI / 180;
+            ctx.arc(a.x, a.y, rr, a.ang - half, a.ang + half);
+            ctx.arc(a.x, a.y, rr * 0.55, a.ang + half, a.ang - half, true);
+          }
+          ctx.closePath();
+          ctx.fillStyle = 'rgba(143,216,255,0.55)'; ctx.fill();
+          ctx.lineWidth = 1.5; ctx.strokeStyle = '#e6f8ff'; ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        case K.BOLT:
+          ctx.globalAlpha = Math.min(1, a.life / 0.12);
+          circle(ctx, a.x, a.y, a.r);
+          ctx.fillStyle = 'rgba(255,242,122,0.4)'; ctx.fill();
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+          ctx.beginPath();
+          ctx.moveTo(a.x + 10, a.y - 150); ctx.lineTo(a.x - 8, a.y - 100);
+          ctx.lineTo(a.x + 7, a.y - 55); ctx.lineTo(a.x - 4, a.y - 20); ctx.lineTo(a.x, a.y);
+          ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(255,242,122,0.6)'; ctx.stroke();
+          ctx.lineWidth = 2; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        case K.CHAIN:
+          ctx.globalAlpha = Math.min(1, a.life / 0.1);
+          ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo((a.sx + a.x) / 2 + 6, (a.sy + a.y) / 2 - 6); ctx.lineTo(a.x, a.y);
+          ctx.lineWidth = 2.5; ctx.strokeStyle = '#fff27a'; ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        case K.FLASK:
+          circle(ctx, a.x, a.y, a.r);
+          ctx.strokeStyle = 'rgba(185,140,240,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+          ctx.fillStyle = '#a56bd8';
+          circle(ctx, a.sx + (a.x - a.sx) * p, a.sy + (a.y - a.sy) * p - Math.sin(p * Math.PI) * 50, 5);
+          ctx.fill();
+          ctx.lineWidth = 1.2; ctx.strokeStyle = '#2a1640'; ctx.stroke();
+          break;
+        case K.SEED:
+          var armed = a.tickT >= 0.5;
+          ctx.fillStyle = armed && (((R.time * 6) | 0) & 1) ? '#f4ff9a' : '#b6e04a';
+          circle(ctx, a.x, a.y, 4.5); ctx.fill();
+          ctx.lineWidth = 1.2; ctx.strokeStyle = '#2f4a10'; ctx.stroke();
+          if (armed) {
+            ctx.globalAlpha = 0.35; circle(ctx, a.x, a.y, 24);
+            ctx.strokeStyle = '#b6e04a'; ctx.stroke(); ctx.globalAlpha = 1;
+          }
+          break;
+        case K.TELE:
+          circle(ctx, a.x, a.y, a.r);
+          ctx.fillStyle = 'rgba(230,60,60,0.14)'; ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,90,90,0.9)'; ctx.stroke();
+          circle(ctx, a.x, a.y, a.r * p);
+          ctx.fillStyle = 'rgba(230,60,60,0.32)'; ctx.fill();
+          break;
+      }
+    }
+  }
+
+  // 항상 켜진 무기 연출: 재의 원, 등롱 궤도
+  function drawWeaponFx(ctx, g) {
+    var P = LW.player, list = g.weapons;
+    for (var i = 0; i < list.length; i++) {
+      var w = list[i], bh = w.def.behavior;
+      if (bh === 'halo') {
+        circle(ctx, P.x, P.y, w.curR || 55);
+        ctx.fillStyle = w.evolved ? 'rgba(255,233,168,0.10)' : 'rgba(185,169,154,0.09)'; ctx.fill();
+        ctx.lineWidth = w.pulse > 0 ? 3 : 1.5;
+        ctx.strokeStyle = w.evolved ? 'rgba(255,233,168,0.7)' : 'rgba(200,186,172,' + (w.pulse > 0 ? 0.85 : 0.4) + ')';
+        ctx.stroke();
+      } else if (bh === 'orbit' && w.on) {
+        for (var k = 0; k < w.pn; k++) {
+          var x = w.px[k], y = w.py[k];
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 0.5;
+          ctx.drawImage(R.glow, x - 26, y - 26, 52, 52);
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.fillStyle = '#34363e';
+          roundRect(ctx, x - 4.5, y - 5.5, 9, 11, 2.2); ctx.fill();
+          ctx.lineWidth = 1.3; ctx.strokeStyle = '#15161a'; ctx.stroke();
+          ctx.fillStyle = '#ffe08a';
+          ctx.fillRect(x - 2.8, y - 3.6, 5.6, 7.2);
+          LW.drawFlame(ctx, x, y + 0.5, 7);
+        }
+      }
     }
   }
 
@@ -371,9 +515,11 @@
     ctx.translate(v.w / 2 - cam.x, v.h / 2 - cam.y);
     ctx.fillStyle = R.bgPat;
     ctx.fillRect(cam.x - v.w / 2, cam.y - v.h / 2, v.w, v.h);
+    drawAreas(ctx, l, r, t, b);
     drawGems(ctx, g, l, r, t, b);
     drawEnemies(ctx, g, l, r, t, b);
     drawPlayer(ctx, g);
+    drawWeaponFx(ctx, g);
     drawProjectiles(ctx, l, r, t, b);
     drawEffects(ctx, l, r, t, b);
     ctx.restore();

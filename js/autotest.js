@@ -148,6 +148,7 @@
       weapons: (g.weapons || []).map(function (w) {
         return { id: w.def.id, level: w.lv, evolved: !!w.evolved };
       }),
+      dmgBySlot: g.dmgBySlot ? Array.prototype.map.call(g.dmgBySlot, Math.round) : [],
       passives: (g.passives || []).map(function (p) { return { id: p.def.id, level: p.lv }; }),
       bossesSeen: g.bossesSeen || [],
       eventsFired: LW.spawner && LW.spawner.fired ? LW.spawner.fired : {},

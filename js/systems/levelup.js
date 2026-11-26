@@ -10,7 +10,7 @@
 
   // 다음 레벨에서 바뀌는 수치 한 줄
   function weaponDiff(def, lv) {
-    var a = def.levels[lv - 1], b = def.levels[lv], out = '', keys = ['dmg', 'n', 'pierce', 'cd'];
+    var a = def.levels[lv - 1], b = def.levels[lv], out = '', keys = def.keys;
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i];
       if (a[k] !== b[k]) out += (out ? ', ' : '') + def.labels[k] + ' ' + fmt(a[k]) + '→' + fmt(b[k]);
