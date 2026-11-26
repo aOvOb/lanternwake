@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1418">
+<title>Lanternwake 등불지기</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#0b1418;overscroll-behavior:none;
+  touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent}
+body{position:fixed;inset:0}
+canvas{display:block;width:100vw;height:100vh;height:100dvh;touch-action:none}
+#safe{position:fixed;inset:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);visibility:hidden;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="safe"></div>
+<script src="./js/config.js"></script>
+<script src="./js/autotest.js"></script>
+<script src="./js/util.js"></script>
+<script src="./js/storage.js"></script>
+<script src="./js/quality.js"></script>
+<script src="./js/platform.js"></script>
+<script src="./js/input.js"></script>
+<script src="./js/audio.js"></script>
+<script src="./js/grid.js"></script>
+<script src="./js/data/enemies.js"></script>
+<script src="./js/data/weapons.js"></script>
+<script src="./js/data/waves.js"></script>
+<script src="./js/entities/player.js"></script>
+<script src="./js/entities/enemies.js"></script>
+<script src="./js/entities/projectiles.js"></script>
+<script src="./js/entities/areas.js"></script>
+<script src="./js/entities/pickups.js"></script>
+<script src="./js/entities/effects.js"></script>
+<script src="./js/weapons/behaviors.js"></script>
+<script src="./js/systems/spawner.js"></script>
+<script src="./js/systems/levelup.js"></script>
+<script src="./js/systems/collision.js"></script>
+<script src="./js/render.js"></script>
+<script src="./js/ui.js"></script>
+<script src="./js/game.js"></script>
+<script src="./js/main.js"></script>
+</body>
+</html>
