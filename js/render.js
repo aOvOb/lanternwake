@@ -134,6 +134,130 @@
         circle(ctx, -r * 0.3, -r * 0.2, 1.2); ctx.fill();
         circle(ctx, r * 0.3, -r * 0.2, 1.2); ctx.fill();
       }
+    },
+    // 보라 삼각 날개
+    moth: function (ctx, r, frame, flash) {
+      var wing = flash ? '#fff' : '#6a3fa0', edge = flash ? '#fff' : '#1d0f33', up = frame ? 0.25 : -0.15;
+      ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.strokeStyle = edge;
+      ctx.fillStyle = wing;
+      tri(ctx, -r * 0.2, 0, -r * 1.5, -r * (0.9 + up), -r * 1.1, r * 0.8); ctx.fill(); ctx.stroke();
+      tri(ctx, r * 0.2, 0, r * 1.5, -r * (0.9 + up), r * 1.1, r * 0.8); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash ? '#fff' : '#2a1a40';
+      ellipse(ctx, 0, 0, r * 0.38, r * 0.7); ctx.fill(); ctx.stroke();
+      if (!flash) { ctx.fillStyle = '#ffd34d'; circle(ctx, -r * 0.16, -r * 0.3, 1.1); ctx.fill(); circle(ctx, r * 0.16, -r * 0.3, 1.1); ctx.fill(); }
+    },
+    // 갈색 물방울과 흰 눈
+    mudling: function (ctx, r, frame, flash) {
+      var sq = frame ? 1.06 : 0.96;
+      ctx.lineWidth = 2; ctx.strokeStyle = flash ? '#fff' : '#2a1c10'; ctx.fillStyle = flash ? '#fff' : '#7a5230';
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 1.1);
+      ctx.quadraticCurveTo(r * 1.2 * sq, -r * 0.1, r * 0.9 * sq, r * 0.6);
+      ctx.quadraticCurveTo(0, r * 1.15, -r * 0.9 * sq, r * 0.6);
+      ctx.quadraticCurveTo(-r * 1.2 * sq, -r * 0.1, 0, -r * 1.1);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      if (!flash) {
+        ctx.fillStyle = '#fff'; circle(ctx, -r * 0.32, 0, r * 0.22); ctx.fill(); circle(ctx, r * 0.32, 0, r * 0.22); ctx.fill();
+        ctx.fillStyle = '#111'; circle(ctx, -r * 0.3, r * 0.04, r * 0.09); ctx.fill(); circle(ctx, r * 0.34, r * 0.04, r * 0.09); ctx.fill();
+      }
+    },
+    // 연두 원과 돌기
+    spore: function (ctx, r, frame, flash) {
+      var pul = frame ? 1.06 : 0.97;
+      ctx.lineWidth = 1.8; ctx.strokeStyle = flash ? '#fff' : '#26401a'; ctx.fillStyle = flash ? '#fff' : '#8ccf4a';
+      for (var i = 0; i < 8; i++) {
+        var a = i * Math.PI / 4; circle(ctx, Math.cos(a) * r * 0.95 * pul, Math.sin(a) * r * 0.95 * pul, r * 0.26); ctx.fill(); ctx.stroke();
+      }
+      circle(ctx, 0, 0, r * 0.85 * pul); ctx.fill(); ctx.stroke();
+      if (!flash) { ctx.fillStyle = '#d6f59a'; circle(ctx, -r * 0.2, -r * 0.2, r * 0.3); ctx.fill(); ctx.fillStyle = '#3a5a22'; circle(ctx, r * 0.15, r * 0.2, r * 0.14); ctx.fill(); }
+    },
+    // 회색 투구와 빨간 눈 틈
+    rusthelm: function (ctx, r, frame, flash) {
+      ctx.lineWidth = 2; ctx.strokeStyle = flash ? '#fff' : '#1c1d22'; ctx.fillStyle = flash ? '#fff' : '#7d8088';
+      ctx.beginPath(); ctx.arc(0, -r * 0.1, r * 0.95, Math.PI, 0); ctx.lineTo(r * 0.95, r * 0.75); ctx.lineTo(-r * 0.95, r * 0.75); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash ? '#fff' : '#555860'; ctx.fillRect(-r * 1.05, r * 0.55, r * 2.1, r * 0.35); ctx.strokeRect(-r * 1.05, r * 0.55, r * 2.1, r * 0.35);
+      if (!flash) {
+        ctx.fillStyle = '#d83a2a'; ctx.fillRect(-r * 0.7, r * 0.0, r * 1.4, r * 0.2 + (frame ? 0.6 : 0));
+        ctx.fillStyle = '#a0522d'; ctx.fillRect(-r * 0.5, -r * 0.6, r * 0.25, r * 0.3);
+      }
+    },
+    // 남색 원과 노란 눈동자
+    eye: function (ctx, r, frame, flash) {
+      ctx.lineWidth = 1.8; ctx.strokeStyle = flash ? '#fff' : '#0a0f2a'; ctx.fillStyle = flash ? '#fff' : '#2a3a8a';
+      circle(ctx, 0, 0, r); ctx.fill(); ctx.stroke();
+      if (!flash) {
+        ctx.fillStyle = '#ffe14d'; ellipse(ctx, 0, 0, r * 0.72, r * (frame ? 0.5 : 0.56)); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#111'; ellipse(ctx, 0, 0, r * 0.2, r * 0.46); ctx.fill();
+      }
+    },
+    // 회색 둥근 사각형과 엄니
+    boar: function (ctx, r, frame, flash) {
+      ctx.lineWidth = 2; ctx.strokeStyle = flash ? '#fff' : '#1e1e22'; ctx.fillStyle = flash ? '#fff' : '#8b8d94';
+      roundRect(ctx, -r, -r * 0.8, r * 2, r * 1.6, r * 0.5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash ? '#fff' : '#eee8d0';
+      tri(ctx, -r * 0.55, r * 0.5, -r * 0.2, r * 0.55, -r * 0.45, r * 1.15); ctx.fill(); ctx.stroke();
+      tri(ctx, r * 0.55, r * 0.5, r * 0.2, r * 0.55, r * 0.45, r * 1.15); ctx.fill(); ctx.stroke();
+      if (!flash) { ctx.fillStyle = '#d83a3a'; circle(ctx, -r * 0.4, -r * 0.2, 1.5); ctx.fill(); circle(ctx, r * 0.4, -r * 0.2, 1.5); ctx.fill(); }
+      ctx.strokeStyle = flash ? '#fff' : '#3a3a40'; ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(-r * 0.5, -r * 0.8); ctx.lineTo(-r * 0.3, -r * (1.15 + (frame ? 0.1 : 0))); ctx.moveTo(r * 0.5, -r * 0.8); ctx.lineTo(r * 0.3, -r * (1.15 + (frame ? 0.1 : 0))); ctx.stroke();
+    },
+    // 검은 V자(날개를 편 실루엣)
+    crow: function (ctx, r, frame, flash) {
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      var tip = frame ? 0.5 : 0.1;
+      ctx.beginPath(); ctx.moveTo(-r * 1.5, -r * tip); ctx.lineTo(0, r * 0.5); ctx.lineTo(r * 1.5, -r * tip);
+      ctx.lineWidth = 4.2; ctx.strokeStyle = flash ? '#fff' : '#08080c'; ctx.stroke();
+      ctx.lineWidth = 2; ctx.strokeStyle = flash ? '#fff' : '#3c3c48'; ctx.stroke();
+      if (!flash) { ctx.fillStyle = '#e04a4a'; circle(ctx, 0, r * 0.1, 1.1); ctx.fill(); }
+    },
+    // 보스: 잿더미 거인(재색 덩어리, 주황 균열과 눈)
+    colossus: function (ctx, r, frame, flash) {
+      ctx.lineWidth = 3; ctx.strokeStyle = flash ? '#fff' : '#17110d'; ctx.fillStyle = flash ? '#fff' : '#5a4f48';
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.7, r * 0.9); ctx.lineTo(-r * 1.0, r * 0.1); ctx.lineTo(-r * 0.75, -r * 0.7);
+      ctx.lineTo(-r * 0.2, -r * 1.0); ctx.lineTo(r * 0.5, -r * 0.85); ctx.lineTo(r * 1.0, -r * 0.2);
+      ctx.lineTo(r * 0.85, r * 0.8); ctx.closePath(); ctx.fill(); ctx.stroke();
+      if (!flash) {
+        ctx.strokeStyle = '#ff7a2a'; ctx.lineWidth = 2.4;
+        ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.5); ctx.lineTo(-r * 0.2, -r * 0.05); ctx.lineTo(-r * 0.45, r * 0.45);
+        ctx.moveTo(r * 0.45, -r * 0.4); ctx.lineTo(r * 0.2, r * 0.1); ctx.lineTo(r * 0.5, r * 0.6); ctx.stroke();
+        ctx.fillStyle = frame ? '#ffd34d' : '#ff9a3c';
+        circle(ctx, -r * 0.3, -r * 0.35, r * 0.13); ctx.fill(); circle(ctx, r * 0.3, -r * 0.35, r * 0.13); ctx.fill();
+      }
+    },
+    // 보스: 밤나방 여왕(큰 보라 날개와 왕관)
+    queen: function (ctx, r, frame, flash) {
+      var up = frame ? 0.2 : -0.1;
+      ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.strokeStyle = flash ? '#fff' : '#1d0f33'; ctx.fillStyle = flash ? '#fff' : '#7a45b8';
+      tri(ctx, -r * 0.2, -r * 0.1, -r * 1.5, -r * (1.0 + up), -r * 1.15, r * 0.9); ctx.fill(); ctx.stroke();
+      tri(ctx, r * 0.2, -r * 0.1, r * 1.5, -r * (1.0 + up), r * 1.15, r * 0.9); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash ? '#fff' : '#4a2a7a';
+      tri(ctx, -r * 0.2, r * 0.1, -r * 1.0, r * 0.2, -r * 0.8, r * 1.0); ctx.fill(); ctx.stroke();
+      tri(ctx, r * 0.2, r * 0.1, r * 1.0, r * 0.2, r * 0.8, r * 1.0); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = flash ? '#fff' : '#2a1a40';
+      ellipse(ctx, 0, 0, r * 0.42, r * 0.8); ctx.fill(); ctx.stroke();
+      if (!flash) {
+        ctx.fillStyle = '#ffd34d'; ctx.strokeStyle = '#6a4a10'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(-r * 0.3, -r * 0.62); ctx.lineTo(-r * 0.3, -r * 1.0); ctx.lineTo(-r * 0.1, -r * 0.78); ctx.lineTo(0, -r * 1.05);
+        ctx.lineTo(r * 0.1, -r * 0.78); ctx.lineTo(r * 0.3, -r * 1.0); ctx.lineTo(r * 0.3, -r * 0.62); ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#ff5a8a'; circle(ctx, -r * 0.15, -r * 0.2, 2); ctx.fill(); circle(ctx, r * 0.15, -r * 0.2, 2); ctx.fill();
+      }
+    },
+    // 보스: 마지막 그림자(검은 윤곽과 보랏빛 흰 눈)
+    last: function (ctx, r, frame, flash) {
+      ctx.lineWidth = 3; ctx.strokeStyle = flash ? '#fff' : '#9a5adf'; ctx.fillStyle = flash ? '#fff' : '#0c0714';
+      ctx.beginPath(); ctx.moveTo(-r * 0.95, r * 0.95);
+      for (var i = 0; i < 5; i++) {
+        ctx.lineTo(-r * 0.95 + (i + 0.5) * r * 0.38, r * (frame ? 0.7 : 0.8));
+        ctx.lineTo(-r * 0.95 + (i + 1) * r * 0.38, r * 0.95);
+      }
+      ctx.lineTo(r * 0.95, -r * 0.1);
+      ctx.arc(0, -r * 0.1, r * 0.95, 0, Math.PI, true);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      if (!flash) {
+        ctx.fillStyle = '#f4e8ff'; ellipse(ctx, -r * 0.33, -r * 0.2, r * 0.17, r * 0.27); ctx.fill(); ellipse(ctx, r * 0.33, -r * 0.2, r * 0.17, r * 0.27); ctx.fill();
+        ctx.fillStyle = '#9a5adf'; circle(ctx, -r * 0.33, -r * 0.18, r * 0.07); ctx.fill(); circle(ctx, r * 0.33, -r * 0.18, r * 0.07); ctx.fill();
+      }
     }
   };
 
@@ -478,6 +602,41 @@
     }
   }
 
+  // 돌진 예고선: 멧돼지와 마지막 그림자가 방향을 고정하고 기다리는 동안 그 방향으로 붉은 띠를 보여준다
+  function drawChargeLines(ctx, l, r, t, b) {
+    var items = LW.enemies.items, n = LW.enemies.n;
+    for (var i = 0; i < n; i++) {
+      var e = items[i];
+      if (!e.active || e.aiState !== 1 || (e.def.ai !== 'charge' && e.def.ai !== 'last')) continue;
+      if (e.x < l - 300 || e.x > r + 300 || e.y < t - 300 || e.y > b + 300) continue;
+      var len = e.def.ai === 'last' ? 400 * 0.5 : 340 * 0.6;
+      var nx = -e.ay * e.r, ny = e.ax * e.r;
+      var x2 = e.x + e.ax * (len + e.r), y2 = e.y + e.ay * (len + e.r);
+      ctx.globalAlpha = 0.28 + 0.2 * Math.sin(R.time * 30);
+      ctx.beginPath();
+      ctx.moveTo(e.x + nx, e.y + ny); ctx.lineTo(x2 + nx, y2 + ny);
+      ctx.lineTo(x2 - nx, y2 - ny); ctx.lineTo(e.x - nx, e.y - ny);
+      ctx.closePath();
+      ctx.fillStyle = '#e63c3c'; ctx.fill();
+      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = 1.5; ctx.strokeStyle = '#ff6a6a'; ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 적 탄: 어두운 붉은 핵과 주황 테두리
+  function drawEBullets(ctx, l, r, t, b) {
+    var items = LW.ebullets.items, n = LW.ebullets.n;
+    for (var i = 0; i < n; i++) {
+      var q = items[i];
+      if (q.x < l || q.x > r || q.y < t || q.y > b) continue;
+      circle(ctx, q.x, q.y, q.r + 1.5);
+      ctx.fillStyle = '#ff7a3a'; ctx.fill();
+      circle(ctx, q.x, q.y, q.r * 0.7);
+      ctx.fillStyle = '#5a1020'; ctx.fill();
+    }
+  }
+
   // 항상 켜진 무기 연출: 재의 원, 등롱 궤도
   function drawWeaponFx(ctx, g) {
     var P = LW.player, list = g.weapons;
@@ -544,12 +703,14 @@
     ctx.fillStyle = R.bgPat;
     ctx.fillRect(cam.x - v.w / 2, cam.y - v.h / 2, v.w, v.h);
     drawAreas(ctx, l, r, t, b);
+    drawChargeLines(ctx, l, r, t, b);
     drawGems(ctx, g, l, r, t, b);
     drawChests(ctx, l, r, t, b);
     drawEnemies(ctx, g, l, r, t, b);
     drawPlayer(ctx, g);
     drawWeaponFx(ctx, g);
     drawProjectiles(ctx, l, r, t, b);
+    drawEBullets(ctx, l, r, t, b);
     drawEffects(ctx, l, r, t, b);
     ctx.restore();
   }

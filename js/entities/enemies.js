@@ -12,6 +12,101 @@
   }
   var pool = LW.enemies = LW.makePool(LW.POOL.enemies, make);
 
+  var TAU = Math.PI * 2;
+
+  // 추적: 플레이어 쪽으로 속도 sp
+  function chase(e, dx, dy, d, sp) {
+    if (d > 0.01) { e.vx = dx / d * sp; e.vy = dy / d * sp; }
+  }
+
+  // 돌진 상태 기계(멧돼지, 마지막 그림자). 0 대기와 추적, 1 예고선, 2 돌진.
+  // 대기 시간이 끝났고 거리 조건이 맞으면 예고를 시작한다. 방향은 예고 시작 때 고정한다.
+  function charge(e, dt, dx, dy, d, sp, cycle, range, warn, dashT, dashSp) {
+    if (e.aiState === 0) {
+      chase(e, dx, dy, d, sp);
+      e.aiT -= dt;
+      if (e.aiT <= 0 && d <= range && d > 0.01) {
+        e.aiState = 1; e.aiT = warn; e.ax = dx / d; e.ay = dy / d;
+      }
+    } else if (e.aiState === 1) {
+      e.vx = 0; e.vy = 0;
+      e.aiT -= dt;
+      if (e.aiT <= 0) { e.aiState = 2; e.aiT = dashT; }
+    } else {
+      e.vx = e.ax * dashSp; e.vy = e.ay * dashSp;
+      e.aiT -= dt;
+      if (e.aiT <= 0) { e.aiState = 0; e.aiT = cycle; }
+    }
+  }
+
+  // 적 종류별 행동. e.vx, e.vy를 정한다.
+  function ai(e, dt, dx, dy, d) {
+    var sp = e.speed * e.slowMul, ux = d > 0.01 ? dx / d : 0, uy = d > 0.01 ? dy / d : 0, k;
+    switch (e.def.ai) {
+      case 'flutter':
+        // 진행 방향의 수직으로 3Hz로 흔들며 추적(가로 속도 진폭 120)
+        var sw = Math.sin(LW.game.time * TAU * 3 + e.uid) * 120;
+        e.vx = ux * sp - uy * sw; e.vy = uy * sp + ux * sw;
+        break;
+      case 'shoot':
+        // 160~220 거리를 유지하고, 2.8초마다 탄 발사
+        if (d > 220) { e.vx = ux * sp; e.vy = uy * sp; }
+        else if (d < 160) { e.vx = -ux * sp; e.vy = -uy * sp; }
+        else { e.vx = 0; e.vy = 0; }
+        e.aiT -= dt;
+        if (e.aiT <= 0) {
+          if (d < 320) { LW.ebullets.fire(e.x, e.y, ux, uy, 170, 5, 9, 4); e.aiT += 2.8; }
+          else e.aiT = 0.2;
+        }
+        break;
+      case 'charge':
+        // 4초마다, 거리 350 이하면 0.5초 예고선 뒤 340/s로 0.6초 돌진
+        charge(e, dt, dx, dy, d, sp, 4, 350, 0.5, 0.6, 340);
+        break;
+      case 'fly':
+        // 직선 비행(방향은 ax, ay). 수명이 다하면 처치 처리 없이 사라진다
+        e.vx = e.ax * e.speed; e.vy = e.ay * e.speed;
+        e.aiT -= dt;
+        if (e.aiT <= 0) e.active = false;
+        break;
+      case 'colossus':
+        chase(e, dx, dy, d, sp);
+        e.aiT -= dt;
+        if (e.aiT <= 0) {
+          e.aiT += 4;
+          LW.areas.add(LW.AREA.TELE, 0, LW.player.x, LW.player.y, 110, 25, 0.8);
+        }
+        break;
+      case 'queen':
+        chase(e, dx, dy, d, sp);
+        e.aiT -= dt;
+        if (e.aiT <= 0) {
+          e.aiT += 5;
+          LW.ebullets.ring(e.x, e.y, 12, LW.rand() * TAU, 140, 6, 12, 6);
+        }
+        e.aiT2 -= dt;
+        if (e.aiT2 <= 0) {
+          e.aiT2 += 8;
+          for (k = 0; k < 8; k++) {
+            var a = k * TAU / 8, m = LW.enemies.spawnEnemy('moth', e.x + Math.cos(a) * 50, e.y + Math.sin(a) * 50, LW.game.time / 60);
+            if (m) m.special = true;
+          }
+        }
+        break;
+      case 'last':
+        // 5초마다 0.6초 예고선 뒤 400/s로 0.5초 돌진, 4초마다 16방향 탄
+        charge(e, dt, dx, dy, d, sp, 5, 99999, 0.6, 0.5, 400);
+        e.aiT2 -= dt;
+        if (e.aiT2 <= 0) {
+          e.aiT2 += 4;
+          LW.ebullets.ring(e.x, e.y, 16, LW.rand() * TAU, 150, 6, 14, 6);
+        }
+        break;
+      default:
+        chase(e, dx, dy, d, sp);
+    }
+  }
+
   // minutes: 경과 분. 시간 보정은 스폰할 때 한 번만 적용한다
   pool.spawnEnemy = function (defId, x, y, minutes) {
     var e = pool.spawn();
@@ -28,6 +123,15 @@
     e.kbRes = d.kbRes; e.kbX = 0; e.kbY = 0;
     e.slowT = 0; e.slowMul = 1; e.freezeT = 0; e.flashT = 0;
     e.aiState = 0; e.aiT = 0; e.aiT2 = 0; e.ax = 0; e.ay = 0;
+    // 첫 행동 시점을 흩어 놓는다
+    if (d.ai === 'shoot') e.aiT = LW.rand() * 2.8;
+    else if (d.ai === 'charge') e.aiT = 1 + LW.rand() * 3;
+    else if (d.ai === 'colossus') e.aiT = 2;
+    else if (d.ai === 'queen') { e.aiT = 3; e.aiT2 = 6; }
+    else if (d.ai === 'last') { e.aiT = 4; e.aiT2 = 3; }
+    else if (d.ai === 'fly') e.aiT = 6;
+    var sc = LW.spawner.spawned;
+    sc[defId] = (sc[defId] || 0) + 1;
     e.hitCd.fill(0);
     return e;
   };
@@ -38,6 +142,16 @@
     e.maxHp *= 12; e.hp = e.maxHp;
     e.r *= 1.5; e.dmg *= 1.5; e.speed *= 0.9;
     e.xp = 20; e.kbRes = 0.8;
+    return e;
+  };
+
+  // 보스: 시간 보정 없이 표의 값 그대로. 넉백, 빙결, 끌어당김이 통하지 않고 상한과 무관하다.
+  pool.spawnBoss = function (defId, x, y) {
+    var e = pool.spawnEnemy(defId, x, y, 0);
+    if (!e) return null;
+    e.boss = true; e.special = true; e.xp = 100; e.kbRes = 1;
+    pool.boss = e;
+    LW.game.bossesSeen.push(defId);
     return e;
   };
 
@@ -59,10 +173,9 @@
       if (e.freezeT > 0) {
         e.freezeT -= dt;
         e.vx = 0; e.vy = 0;
-      } else if (d > 0.01) {
-        // 행동은 S8에서 종류별로 늘린다. 지금은 추적만 한다.
-        var sp = e.speed * e.slowMul;
-        e.vx = dx / d * sp; e.vy = dy / d * sp;
+      } else {
+        ai(e, dt, dx, dy, d);
+        if (!e.active) continue;      // 까마귀가 수명이 다해 사라졌다
       }
       e.x += (e.vx + e.kbX * KB) * dt;
       e.y += (e.vy + e.kbY * KB) * dt;
@@ -106,11 +219,11 @@
     // 3) 재배치: 너무 멀어지면 처치 처리 없이 플레이어 이동 방향 쪽 테두리로 옮긴다
     for (i = 0; i < n; i++) {
       var f = items[i];
-      if (!f.active || f.boss) continue;
+      if (!f.active || f.boss || f.def.noReloc) continue;
       var rx = f.x - P.x, ry = f.y - P.y;
       if (rx * rx + ry * ry > far2) LW.spawner.relocate(f);
     }
   };
 
-  pool.reset = function () { pool.clear(); };
+  pool.reset = function () { pool.clear(); pool.boss = null; };
 })();

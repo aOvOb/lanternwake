@@ -372,6 +372,9 @@
     g.kills++;
     LW.spawnGem(e.x, e.y, e.xp);
     if (e.elite) LW.dropChest(e.x, e.y, false);
+    if (e.boss) { LW.dropChest(e.x, e.y, true); g.bossKilled = (g.bossKilled || 0) + 1; }
+    // 부푼 포자: 0.6초 예고 뒤 반경 55 폭발(플레이어 피해 14). 질의 없이 장판으로 미룬다
+    if (e.def.id === 'spore') LW.areas.add(LW.AREA.TELE, 0, e.x, e.y, 55, 14, 0.6);
     var n = LW.quality.level === 0 ? 6 : (LW.quality.level === 1 ? 4 : 2);
     LW.effects.burst(e.x, e.y, n, 2);
   };

@@ -54,7 +54,7 @@
     if (align === 1) x -= s.w / 2; else if (align === 2) x -= s.w;
     ctx.drawImage(s.cv, x, y, s.w, s.h);
   }
-  var sprLv = makeSpr(), sprTime = makeSpr(), sprKills = makeSpr();
+  var sprLv = makeSpr(), sprTime = makeSpr(), sprKills = makeSpr(), sprBoss = makeSpr();
   var sprW = [], sprP = [];
   for (var si = 0; si < 6; si++) { sprW.push(makeSpr()); sprP.push(makeSpr()); }
 
@@ -159,6 +159,13 @@
     }
   }
 
+  // 디버그 B키: 보스 3종을 차례로 바로 만든다
+  var dbgB = 0;
+  function dbgBoss() {
+    var ids = ['colossus', 'queen', 'last'];
+    LW.spawner.spawnBossAt(ids[dbgB++ % 3]);
+  }
+
   function handleKey(code) {
     var g = LW.game, st = g.state, lu = LW.levelup;
     if (LW.params.debug && code === 'F2') { ui.dbgOverlay = !ui.dbgOverlay; return; }
@@ -172,6 +179,7 @@
         else if (code === 'KeyI') g.god = !g.god;
         else if (code === 'KeyW') dbgCycleWeapon();
         else if (code === 'KeyE') dbgElite();
+        else if (code === 'KeyB') dbgBoss();
         else if (code === 'KeyC') g.giveChest(false);
       }
     } else if (st === 'PAUSED') {
@@ -250,6 +258,27 @@
       if (v.portrait) { sx = s.l + 8 + i * (sz + gap); sy = v.h - s.b - 8 - sz; }
       else { sx = s.l + 8 + sz + gap; sy = s.t + 48 + i * (sz + gap); }
       slot(ctx, sx, sy, sz, g.passives[i], sprP[i]);
+    }
+  }
+
+  // 보스 HP 바(경험치 바 아래)와 경고 배너
+  function drawBoss(ctx, g) {
+    var v = LW.view, s = LW.safe, b = LW.enemies.boss;
+    if (b && b.active && b.boss) {
+      var bw = Math.min(v.w - 150, 300), bx = (v.w - bw) / 2, by = s.t + 44;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(bx - 2, by - 2, bw + 4, 12);
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(bx, by, bw * Math.max(0, b.hp / b.maxHp), 8);
+      setSpr(sprBoss, b.def.name, b.def.name, 12, '#ffd9d9');
+      drawSpr(ctx, sprBoss, v.w / 2, by + 11, 1);
+    }
+    if (g.bannerT > 0) {
+      var by2 = v.h * 0.22, h = 54;
+      var a = Math.min(1, g.bannerT / 0.4) * (0.75 + 0.25 * Math.sin(performance.now() / 90));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = 'rgba(150,20,30,0.8)'; ctx.fillRect(0, by2, v.w, h);
+      ctx.fillStyle = '#ff6a6a'; ctx.fillRect(0, by2, v.w, 3); ctx.fillRect(0, by2 + h - 3, v.w, 3);
+      text(ctx, g.bannerText, v.w / 2, by2 + h / 2, 20, '#ffffff');
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -416,6 +445,7 @@
     ui.layout();
     var v = LW.view, i, st = g.state;
     drawHud(ctx, g);
+    drawBoss(ctx, g);
     if (st === 'PLAYING') drawJoystick(ctx);
     for (i = 0; i < nBtn && st !== 'LEVELUP'; i++) {
       if (btns[i].id === 'resume' || btns[i].id === 'retry' || btns[i].id === 'title' || btns[i].id === 'chest_ok') continue;

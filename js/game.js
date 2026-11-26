@@ -5,11 +5,11 @@
   var g = LW.game = {
     state: 'TITLE',
     time: 0, kills: 0, level: 1, xp: 0, xpNeed: LW.xpReq(1), pending: 0,
-    weapons: [], passives: [], chestN: 0, chestB: 0, chestsOpened: 0, bossesSeen: [], dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
+    weapons: [], passives: [], chestN: 0, chestB: 0, chestsOpened: 0, bossesSeen: [], bannerText: '', bannerT: 0, dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
     god: false, won: false
   };
   var perf = LW.perf = {
-    updSum: 0, updN: 0, rndSum: 0, rndN: 0, updLast: 0, rndLast: 0, fps: 60, maxEnemies: 0
+    updSum: 0, updN: 0, rndSum: 0, rndN: 0, updLast: 0, rndLast: 0, fps: 60, maxEnemies: 0, maxNormal: 0
   };
 
   var last = 0, acc = 0;
@@ -31,15 +31,15 @@
     g.dmgBySlot.fill(0);
     g.passives = [];
     g.chestN = 0; g.chestB = 0; g.chestsOpened = 0;
-    g.bossesSeen = [];
-    LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset();
+    g.bossesSeen = []; g.bannerT = 0; g.bossKilled = 0;
+    LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset(); LW.ebullets.reset();
     LW.gems.reset(); LW.pickups.reset(); LW.effects.reset();
     LW.player.reset();
     LW.quality.reset();
     LW.platform.resize();
     LW.spawner.reset();
     g.weapons = [LW.makeWeapon('ember', 0)];
-    perf.maxEnemies = 0;
+    perf.maxEnemies = 0; perf.maxNormal = 0;
     last = performance.now(); acc = 0;
   };
 
@@ -83,6 +83,7 @@
     if (LW.autotest.active) { LW.autotest.tick(dt); LW.autotest.step(dt); }
     // 1. 시간
     g.time += dt;
+    if (g.bannerT > 0) g.bannerT -= dt;
     if (g.time >= LW.WIN_TIME) { g.end(true); return; }
     LW.spawner.update(dt);                 // 2
     P.update(dt);                          // 3
