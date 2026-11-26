@@ -46,7 +46,7 @@
       size: size,
       n: 0,
       spawn: function (limit) {
-        if (this.n >= (limit || size)) return null;
+        if (this.n >= (limit === undefined ? size : limit)) return null;
         var it = items[this.n++];
         it.active = true;
         return it;

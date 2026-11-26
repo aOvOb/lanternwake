@@ -6,17 +6,23 @@
     stats: { might: 1, cooldown: 1, area: 1, duration: 1, projSpeed: 1, amount: 0 }
   };
 
-  // 패시브를 얻거나 레벨이 오를 때만 호출한다. 패시브는 S6에서 반영한다.
+  // 패시브를 얻거나 레벨이 오를 때만 호출한다. 기본값에서 다시 계산한다.
+  // 최대 HP가 늘면 늘어난 만큼 현재 HP도 오른다.
   P.recomputeStats = function () {
-    var s = P.stats;
+    var s = P.stats, old = P.maxHp;
     s.might = 1; s.cooldown = 1; s.area = 1; s.duration = 1; s.projSpeed = 1; s.amount = 0;
     P.moveMul = 1;
     P.maxHp = 100; P.magnet = 60; P.armor = 0; P.regen = 0;
+    var list = LW.game ? LW.game.passives : null;
+    if (list) for (var i = 0; i < list.length; i++) list[i].def.apply(P, list[i].lv);
+    if (P.maxHp > old) P.hp += P.maxHp - old;
+    if (P.hp > P.maxHp) P.hp = P.maxHp;
   };
 
   P.reset = function () {
     P.x = 0; P.y = 0;
     P.invuln = 0; P.facing = 1; P.lastDx = 1; P.lastDy = 0; P.animT = 0;
+    P.maxHp = 100;
     P.recomputeStats();
     P.hp = P.maxHp;
   };

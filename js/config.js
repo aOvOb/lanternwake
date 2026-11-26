@@ -52,6 +52,7 @@ window.LW = window.LW || {};
   LW.OVERLAY_LOCK = 0.4;
   LW.KB_SCALE = 30;
   LW.WEAPON_SLOTS = 6;
+  LW.PASSIVE_SLOTS = 6;
   LW.FONT = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
 
   // 질의 결과 공용 버퍼

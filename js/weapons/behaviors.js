@@ -364,6 +364,8 @@
   };
 
   // 풀에서의 제거는 enemies.compact()가 한 번에 한다(질의 결과의 인덱스를 지키기 위해)
+  // 주의: dealDamage와 killEnemy 안에서는 LW.qbuf를 쓰는 질의(queryRadius, nearest)를 부르지 않는다.
+  // 호출한 쪽이 qbuf를 순회 중이라 덮어써진다. 포자 폭발은 예고 장판으로 미뤄서 처리한다.
   LW.killEnemy = function (e) {
     var g = LW.game;
     e.active = false;

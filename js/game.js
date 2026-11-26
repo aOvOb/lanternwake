@@ -5,7 +5,7 @@
   var g = LW.game = {
     state: 'TITLE',
     time: 0, kills: 0, level: 1, xp: 0, xpNeed: LW.xpReq(1), pending: 0,
-    weapons: [], dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
+    weapons: [], passives: [], dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
     god: false, won: false
   };
   var perf = LW.perf = {
@@ -29,6 +29,7 @@
     g.won = false;
     g.god = LW.params.stress || LW.params.god;
     g.dmgBySlot.fill(0);
+    g.passives = [];
     LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset();
     LW.gems.reset(); LW.pickups.reset(); LW.effects.reset();
     LW.player.reset();

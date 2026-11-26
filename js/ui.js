@@ -1,6 +1,6 @@
 // 캔버스 UI: HUD, 버튼, 레벨업 카드, 타이틀, 일시정지, 임시 결과 화면, 탭 판정
 (function () {
-  var ui = LW.ui = { dbgOverlay: false };
+  var ui = LW.ui = { dbgOverlay: LW.params.debug && LW.params.autotest > 0 };
   var FONT = LW.FONT;
   var TAU = Math.PI * 2;
 
@@ -232,7 +232,7 @@
       slot(ctx, sx, sy, sz, g.weapons[i], sprW[i]);
       if (v.portrait) { sx = s.l + 8 + i * (sz + gap); sy = v.h - s.b - 8 - sz; }
       else { sx = s.l + 8 + sz + gap; sy = s.t + 48 + i * (sz + gap); }
-      slot(ctx, sx, sy, sz, null, sprP[i]);   // 패시브는 S6에서 채운다
+      slot(ctx, sx, sy, sz, g.passives[i], sprP[i]);
     }
   }
 
@@ -240,11 +240,11 @@
     rrect(ctx, x, y, sz, sz, 5);
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fill();
-    ctx.strokeStyle = w ? 'rgba(255,233,168,0.8)' : 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = w ? (w.evolved ? '#ffd34d' : 'rgba(255,233,168,0.8)') : 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = w && w.evolved ? 3 : 1.5;
     ctx.stroke();
     if (w) {
-      ctx.fillStyle = w.def.color;
+      ctx.fillStyle = w.evo ? w.evo.color : w.def.color;
       ctx.beginPath(); ctx.arc(x + sz / 2, y + sz / 2 - 2, 7, 0, TAU); ctx.fill();
       setSpr(spr, w.lv, String(w.lv), 10, '#ffffff');
       drawSpr(ctx, spr, x + sz - spr.w + 2, y + sz - spr.h + 3, 0);
@@ -288,6 +288,12 @@
       lines.push('슬롯' + i + ' ' + LW.weaponName(w) + ' Lv' + w.lv + ' 누적 ' + Math.round(g.dmgBySlot[i]));
       lines.push('  ' + txt);
     }
+    var S = g.passives, ps = '';
+    for (i = 0; i < S.length; i++) ps += ' ' + S[i].def.code + ':' + S[i].lv;
+    lines.push('패시브' + (ps || ' 없음'));
+    var st = LW.player.stats;
+    lines.push('피해x' + st.might.toFixed(2) + ' 쿨x' + st.cooldown.toFixed(2) + ' 범위x' + st.area.toFixed(2) + ' 지속x' + st.duration.toFixed(2) + ' 속도x' + st.projSpeed.toFixed(2) + ' +' + st.amount);
+    lines.push('이동x' + LW.player.moveMul.toFixed(2) + ' HP ' + LW.player.maxHp + ' 재생 ' + LW.player.regen.toFixed(1) + ' 자석 ' + LW.player.magnet + ' 방어 ' + LW.player.armor);
     ctx.font = '10px monospace';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';

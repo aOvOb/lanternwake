@@ -41,10 +41,31 @@
     }
   }
 
+  function buildPassives(out, ws) {
+    var g = LW.game, list = g.passives, i, j;
+    for (i = 0; i < list.length; i++) {
+      var p = list[i];
+      if (p.lv >= p.def.maxLv) continue;
+      out.push({ type: 'passive', id: p.def.id, name: p.def.name, color: p.def.color,
+        tag: 'Lv ' + p.lv + ' → ' + (p.lv + 1), desc: p.def.desc });
+      ws.push(1.5);
+    }
+    if (list.length < LW.PASSIVE_SLOTS) {
+      for (i = 0; i < LW.PASSIVES.length; i++) {
+        var def = LW.PASSIVES[i], owned = false;
+        for (j = 0; j < list.length; j++) if (list[j].def === def) owned = true;
+        if (owned) continue;
+        out.push({ type: 'passive', id: def.id, name: def.name, color: def.color, tag: '새로 얻음', desc: def.desc });
+        ws.push(1.0);
+      }
+    }
+  }
+
   lu.open = function () {
     var g = LW.game;
     var pool = [], ws = [];
     buildPool(pool, ws);
+    buildPassives(pool, ws);
     lu.cands = [];
     if (pool.length === 0) {
       lu.cands.push({ type: 'heal', id: 'oil', name: '등잔 기름', color: '#ffd34d', tag: '회복', desc: 'HP 30 회복' });
@@ -74,6 +95,11 @@
       for (var k = 0; k < list.length; k++) if (list[k].def.id === c.id) found = list[k];
       if (found) found.lv++;
       else list.push(LW.makeWeapon(c.id, list.length));
+    } else if (c.type === 'passive') {
+      var pl = g.passives, pf = null;
+      for (var q = 0; q < pl.length; q++) if (pl[q].def.id === c.id) pf = pl[q];
+      if (pf) pf.lv++;
+      else pl.push({ def: LW.PASSIVE_BY_ID[c.id], lv: 1 });
     } else if (c.type === 'heal') {
       var P = LW.player;
       P.hp = Math.min(P.maxHp, P.hp + 30);
