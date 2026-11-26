@@ -7,15 +7,20 @@
   rename <userId> <닉네임> | rebuild-best
 환경 변수: GOOGLE_CLIENT_ID(serve 필수), PUBLIC_ORIGIN, DATA, BOUNDS
 """
+import base64
+import hashlib
+import hmac
 import json
 import math
 import mimetypes
 import os
+import secrets
 import sqlite3
 import sys
 import threading
 import time
 import urllib.parse
+import urllib.request
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -272,11 +277,13 @@ class Buckets:
 # ---------------------------------------------------------------- 앱
 
 class App:
-    def __init__(self, cfg, clock=time.time):
+    def __init__(self, cfg, clock=time.time, jwks_fetch=None):
         self.cfg = cfg
         self.clock = clock
         os.makedirs(cfg.data, exist_ok=True)
         self.db = Db(os.path.join(cfg.data, "game.db"))
+        self.pepper = load_pepper(cfg.data)
+        self.jwks = JwksCache(jwks_fetch or fetch_jwks_http, lambda: self.clock())
         self.buckets = Buckets(lambda: self.clock())
         self.stop_event = threading.Event()
         self.janitor = None
@@ -336,6 +343,7 @@ class Req:
         self.headers = headers
         self.ip = ip
         self.body = b""
+        self.ctype = ""
         self.cookies = parse_cookies(headers.get("Cookie", ""))
         self.user = None
         self.extra_headers = []   # 세션 연장 등으로 응답에 덧붙일 헤더
@@ -398,11 +406,6 @@ def h_health(app, req):
 
 
 WRITE_METHODS = ("POST", "PUT", "DELETE")
-
-
-def find_session_user(app, req):
-    """세션 쿠키로 사용자를 찾는다. S17에서 채운다."""
-    return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -587,6 +590,384 @@ class Server(ThreadingHTTPServer):
 def make_server(app, host=None, port=None):
     return Server((host if host is not None else app.cfg.host,
                    app.cfg.port if port is None else port), app)
+
+
+# ---------------------------------------------------------------- 로그인: ID 토큰 검증
+
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
+GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
+# DigestInfo(SHA-256) 접두 DER. RFC 8017 9.2의 EMSA-PKCS1-v1_5 기대값에 쓴다.
+SHA256_DIGESTINFO = bytes.fromhex("3031300d060960864801650304020105000420")
+MIN_KEY_BITS = 2048
+JWKS_RETRY_SEC = 300          # 키를 못 찾았을 때 다시 받는 최소 간격
+JWKS_DEFAULT_MAX_AGE = 3600
+JWKS_MAX_AGE_RANGE = (60, 86400)
+EXP_LEEWAY = 60
+IAT_LEEWAY = 300
+TOKEN_MAX_LEN = 8192
+
+SESSION_TTL = 180 * 86400
+SESSION_REFRESH_AFTER = 86400
+LOGIN_COOKIE_TTL = 600
+
+B64URL_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
+
+class TokenError(Exception):
+    """로그인 실패 사유 코드(state, token, aud, exp, nonce)를 담는다."""
+
+    def __init__(self, code):
+        Exception.__init__(self, code)
+        self.code = code
+
+
+def sha256_hex(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def b64url_decode(text):
+    if not isinstance(text, str) or any(ch not in B64URL_CHARS for ch in text):
+        raise ValueError("base64url 아님")
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def rsa_verify_pkcs1_sha256(n, e, message, signature):
+    """RFC 8017 8.2.2 방식. 서명을 풀어 기대 인코딩과 통째로 비교한다.
+    패딩을 해석하지 않으므로 패딩 파싱 오류에서 오는 서명 위조가 생기지 않는다."""
+    k = (n.bit_length() + 7) // 8
+    if len(signature) != k:
+        return False
+    s = int.from_bytes(signature, "big")
+    if s >= n:
+        return False
+    em = pow(s, e, n).to_bytes(k, "big")
+    t = SHA256_DIGESTINFO + hashlib.sha256(message).digest()
+    if k < len(t) + 11:
+        return False
+    expected = b"\x00\x01" + b"\xff" * (k - len(t) - 3) + b"\x00" + t
+    return hmac.compare_digest(em, expected)
+
+
+def parse_max_age(cache_control):
+    """Cache-Control 값에서 max-age(초)를 꺼낸다. 없으면 None."""
+    for part in (cache_control or "").split(","):
+        k, _, v = part.strip().partition("=")
+        if k.lower() == "max-age" and v.strip().isdigit():
+            return int(v.strip())
+    return None
+
+
+def parse_jwks(doc):
+    """JWKS 문서에서 {kid: (n, e)}를 만든다. RSA가 아닌 키와 깨진 항목은 건너뛴다."""
+    keys = {}
+    items = doc.get("keys") if isinstance(doc, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("keys 없음")
+    for k in items[:20]:
+        try:
+            if k.get("kty") != "RSA" or not isinstance(k.get("kid"), str):
+                continue
+            keys[k["kid"]] = (int.from_bytes(b64url_decode(k["n"]), "big"),
+                              int.from_bytes(b64url_decode(k["e"]), "big"))
+        except (AttributeError, KeyError, ValueError):
+            continue
+    return keys
+
+
+def fetch_jwks_http():
+    """구글 JWKS를 받는다. (문서, max-age 또는 None)을 돌려준다."""
+    req = urllib.request.Request(GOOGLE_JWKS_URL, headers={"User-Agent": "lanternwake-game-api"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        data = r.read(200001)
+        if len(data) > 200000:
+            raise ValueError("JWKS가 너무 큼")
+        return json.loads(data.decode("utf-8")), parse_max_age(r.headers.get("Cache-Control"))
+
+
+class JwksCache:
+    """kid로 공개키를 찾는다. 캐시 수명은 Cache-Control max-age를 따른다.
+    키가 없거나 수명이 끝났을 때만 다시 받고, 그것도 5분에 한 번으로 제한한다.
+    받기에 실패하면 남아 있는 옛 키를 그대로 쓴다."""
+
+    def __init__(self, fetch, clock):
+        self.fetch = fetch
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.keys = {}
+        self.expires = 0.0
+        self.last_attempt = None
+
+    def get(self, kid):
+        now = self.clock()
+        with self.lock:
+            if kid in self.keys and now < self.expires:
+                return self.keys[kid]
+            if self.last_attempt is None or now - self.last_attempt >= JWKS_RETRY_SEC:
+                self.last_attempt = now
+                try:
+                    doc, max_age = self.fetch()
+                    keys = parse_jwks(doc)
+                except Exception as e:
+                    log_error(e, "jwks")
+                else:
+                    lo, hi = JWKS_MAX_AGE_RANGE
+                    age = JWKS_DEFAULT_MAX_AGE if max_age is None else min(hi, max(lo, max_age))
+                    self.keys = keys
+                    self.expires = now + age
+            return self.keys.get(kid)
+
+
+def is_number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def verify_id_token(app, token, nonce):
+    """ID 토큰을 검증하고 sub를 돌려준다. 실패하면 TokenError(사유 코드)."""
+    if not isinstance(token, str) or len(token) > TOKEN_MAX_LEN:
+        raise TokenError("token")
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise TokenError("token")
+    try:
+        header = json.loads(b64url_decode(parts[0]).decode("utf-8"))
+        payload = json.loads(b64url_decode(parts[1]).decode("utf-8"))
+        signature = b64url_decode(parts[2])
+    except (ValueError, UnicodeDecodeError):
+        raise TokenError("token")
+    if not isinstance(header, dict) or not isinstance(payload, dict):
+        raise TokenError("token")
+    # alg는 토큰이 아니라 우리가 정한다. none, HS256 등은 여기서 거부된다.
+    if header.get("alg") != "RS256":
+        raise TokenError("token")
+    kid = header.get("kid")
+    if not isinstance(kid, str) or not kid:
+        raise TokenError("token")
+    key = app.jwks.get(kid)
+    if key is None:
+        raise TokenError("token")
+    n, e = key
+    if n.bit_length() < MIN_KEY_BITS or not (3 <= e < 2 ** 32) or e % 2 == 0:
+        raise TokenError("token")
+    signing_input = (parts[0] + "." + parts[1]).encode("ascii")
+    if not rsa_verify_pkcs1_sha256(n, e, signing_input, signature):
+        raise TokenError("token")
+
+    # 서명이 맞은 뒤에 클레임을 본다.
+    if payload.get("iss") not in GOOGLE_ISSUERS:
+        raise TokenError("token")
+    client_id = app.cfg.client_id
+    aud, azp = payload.get("aud"), payload.get("azp")
+    if isinstance(aud, list):
+        if client_id not in aud or azp != client_id:
+            raise TokenError("aud")
+    elif aud != client_id:
+        raise TokenError("aud")
+    if azp is not None and azp != client_id:
+        raise TokenError("aud")
+    exp, iat = payload.get("exp"), payload.get("iat")
+    if not is_number(exp) or not is_number(iat):
+        raise TokenError("token")
+    now = app.clock()
+    if not exp > now - EXP_LEEWAY or not iat < now + IAT_LEEWAY:
+        raise TokenError("exp")
+    tn = payload.get("nonce")
+    if not isinstance(tn, str) or not hmac.compare_digest(tn.encode("utf-8"), nonce.encode("utf-8")):
+        raise TokenError("nonce")
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub or len(sub) > 255:
+        raise TokenError("token")
+    return sub
+
+
+# ---------------------------------------------------------------- 로그인: 세션과 라우트
+
+def load_pepper(data_dir):
+    """/data/pepper를 읽는다. 없으면 무작위 32바이트로 만든다. 백업 대상이다."""
+    path = os.path.join(data_dir, "pepper")
+    try:
+        with open(path, "rb") as f:
+            pepper = f.read()
+        if len(pepper) >= 16:
+            return pepper
+        raise RuntimeError("pepper 파일이 너무 짧음: " + path)
+    except FileNotFoundError:
+        pass
+    pepper = secrets.token_bytes(32)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(pepper)
+    return pepper
+
+
+def login_cookie_header(cfg, value, max_age):
+    # 구글 콜백은 다른 사이트에서 오는 POST라 SameSite=None이어야 쿠키가 같이 온다.
+    # 개발 모드(http)는 Secure를 못 쓰므로 속성을 생략한다(브라우저 기본 Lax의 POST 예외에 기댄다).
+    return make_cookie(cfg, cfg.login_cookie, value, max_age, None if cfg.dev else "None")
+
+
+def session_cookie_header(cfg, value, max_age):
+    return make_cookie(cfg, cfg.session_cookie, value, max_age, "Lax")
+
+
+def find_session_user(app, req):
+    """세션 쿠키로 사용자를 찾는다. 하루 넘게 지났으면 만료를 늘리고 쿠키를 새로 내린다."""
+    token = req.cookies.get(app.cfg.session_cookie)
+    if not token or len(token) > 128:
+        return None
+    th = sha256_hex(token)
+    now = app.now()
+    with app.db.read() as c:
+        row = c.execute(
+            "SELECT u.id, u.nickname, u.nickname_set, u.nickname_changed_at, u.imported, u.banned,"
+            " u.created_at, s.last_used_at, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id"
+            " WHERE s.token_hash = ?", (th,)).fetchone()
+    if row is None or row["expires_at"] <= now:
+        return None
+    user = dict(row)
+    user["session_hash"] = th
+    if now - row["last_used_at"] > SESSION_REFRESH_AFTER:
+        with app.db.tx() as c:
+            c.execute("UPDATE sessions SET last_used_at=?, expires_at=? WHERE token_hash=?",
+                      (now, now + SESSION_TTL, th))
+            c.execute("UPDATE users SET last_seen_at=? WHERE id=?", (now, row["id"]))
+        req.extra_headers.append(session_cookie_header(app.cfg, token, SESSION_TTL))
+    return user
+
+
+def first_value(form, key):
+    v = form.get(key)
+    return v[0] if v else ""
+
+
+def new_nickname(c):
+    """등불지기 + 숫자 4자리. 겹치면 다시 뽑고, 계속 겹치면 6자리로 넓힌다."""
+    for digits in (4, 6):
+        for _ in range(50):
+            name = "등불지기%0*d" % (digits, secrets.randbelow(10 ** digits))
+            if c.execute("SELECT 1 FROM users WHERE nickname_key=?", (name.lower(),)).fetchone() is None:
+                return name
+    raise RuntimeError("닉네임을 정하지 못함")
+
+
+def login_user(app, ip, sub):
+    """sub로 사용자를 찾거나 만든다. 새 계정은 IP당 하루 5개까지."""
+    sub_hash = hmac.new(app.pepper, sub.encode("utf-8"), hashlib.sha256).hexdigest()
+    now = app.now()
+    with app.db.tx() as c:
+        row = c.execute("SELECT id FROM users WHERE sub_hash=?", (sub_hash,)).fetchone()
+        if row is not None:
+            c.execute("UPDATE users SET last_seen_at=? WHERE id=?", (now, row["id"]))
+            return row["id"]
+        app.limit(ip, "new_account")
+        name = new_nickname(c)
+        cur = c.execute(
+            "INSERT INTO users(sub_hash, nickname, nickname_key, nickname_set, created_at, last_seen_at)"
+            " VALUES(?,?,?,0,?,?)", (sub_hash, name, name.lower(), now, now))
+        c.execute("INSERT INTO records(user_id, updated_at) VALUES(?,?)", (cur.lastrowid, now))
+        return cur.lastrowid
+
+
+def create_session(app, user_id):
+    token = secrets.token_urlsafe(32)
+    now = app.now()
+    with app.db.tx() as c:
+        c.execute("INSERT INTO sessions(token_hash, user_id, created_at, last_used_at, expires_at)"
+                  " VALUES(?,?,?,?,?)", (sha256_hex(token), user_id, now, now, now + SESSION_TTL))
+    return token
+
+
+@route("GET", "/api/auth/start")
+def h_auth_start(app, req):
+    cfg = app.cfg
+    c = secrets.token_urlsafe(32)
+    params = urllib.parse.urlencode({
+        "client_id": cfg.client_id,
+        "redirect_uri": cfg.origin + "/api/auth/callback",
+        "response_type": "id_token",
+        "response_mode": "form_post",
+        "scope": "openid",
+        "state": c,
+        "nonce": sha256_hex(c),
+        "prompt": "select_account",
+    })
+    return Resp(302, headers=[login_cookie_header(cfg, c, LOGIN_COOKIE_TTL)],
+                location=GOOGLE_AUTH_URL + "?" + params)
+
+
+@route("POST", "/api/auth/callback", form_post=True)
+def h_auth_callback(app, req):
+    cfg = app.cfg
+    clear = login_cookie_header(cfg, "", 0)
+
+    def fail(reason):
+        return Resp(303, headers=[clear], location="/?login=fail&r=" + reason)
+
+    if req.ctype != "application/x-www-form-urlencoded":
+        return fail("state")
+    form = urllib.parse.parse_qs(req.body.decode("utf-8", "replace"), max_num_fields=10,
+                                 keep_blank_values=True)
+    state = first_value(form, "state")
+    c = req.cookies.get(cfg.login_cookie)
+    # 로그인 CSRF 방지: 우리가 이 브라우저에 내린 상태 값과 같아야 한다.
+    if not c or not state or not hmac.compare_digest(c.encode("utf-8"), state.encode("utf-8")):
+        return fail("state")
+    if "error" in form:
+        return fail("google")
+    try:
+        sub = verify_id_token(app, first_value(form, "id_token"), sha256_hex(c))
+    except TokenError as e:
+        return fail(e.code)
+    try:
+        user_id = login_user(app, req.ip, sub)
+    except ApiError:
+        return fail("rate")
+    token = create_session(app, user_id)
+    return Resp(303, headers=[clear, session_cookie_header(cfg, token, SESSION_TTL)],
+                location="/?login=ok")
+
+
+@route("POST", "/api/auth/logout", login="required")
+def h_auth_logout(app, req):
+    with app.db.tx() as c:
+        c.execute("DELETE FROM sessions WHERE token_hash=?", (req.user["session_hash"],))
+    req.extra_headers[:] = []
+    return Resp(200, {"ok": True}, [session_cookie_header(app.cfg, "", 0)])
+
+
+def records_json(row):
+    return {"bestTimeMs": row["best_time_ms"], "bestKills": row["best_kills"],
+            "bestLevel": row["best_level"], "wins": row["wins"], "runs": row["runs"],
+            "fullDawns": row["full_dawns"]}
+
+
+DEFAULT_SETTINGS = {"sound": True, "vibrate": True, "dmgNumbers": True}
+
+
+@route("GET", "/api/me", login="required")
+def h_me(app, req):
+    u = req.user
+    with app.db.read() as c:
+        rec = c.execute("SELECT * FROM records WHERE user_id=?", (u["id"],)).fetchone()
+        st = c.execute("SELECT json, rev FROM settings WHERE user_id=?", (u["id"],)).fetchone()
+    return Resp(200, {
+        "user": {"id": u["id"], "nickname": u["nickname"], "nicknameSet": bool(u["nickname_set"]),
+                 "createdAt": u["created_at"]},
+        "records": records_json(rec),
+        "settings": json.loads(st["json"]) if st else dict(DEFAULT_SETTINGS),
+        "settingsRev": st["rev"] if st else 0,
+        "imported": bool(u["imported"]),
+    })
+
+
+@route("DELETE", "/api/me", login="required")
+def h_me_delete(app, req):
+    if req.json().get("confirm") != "DELETE":
+        raise ApiError(400, "bad_request")
+    with app.db.tx() as c:
+        c.execute("DELETE FROM users WHERE id=?", (req.user["id"],))
+    req.extra_headers[:] = []
+    return Resp(200, {"ok": True}, [session_cookie_header(app.cfg, "", 0)])
 
 
 # ---------------------------------------------------------------- CLI
