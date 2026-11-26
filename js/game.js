@@ -27,7 +27,7 @@
   g.newRun = function () {
     g.time = 0; g.kills = 0; g.level = 1; g.xp = 0; g.xpNeed = LW.xpReq(1); g.pending = 0;
     g.won = false;
-    g.god = LW.params.stress;
+    g.god = LW.params.stress || LW.params.god;
     g.dmgBySlot.fill(0);
     LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset();
     LW.gems.reset(); LW.pickups.reset(); LW.effects.reset();
@@ -74,7 +74,7 @@
 
   function update(dt) {
     var P = LW.player;
-    if (LW.autotest.active) LW.autotest.tick(dt);
+    if (LW.autotest.active) { LW.autotest.tick(dt); LW.autotest.step(dt); }
     // 1. 시간
     g.time += dt;
     if (g.time >= LW.WIN_TIME) { g.end(true); return; }
