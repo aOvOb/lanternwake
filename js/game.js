@@ -122,7 +122,7 @@
     if (LW.autotest.active) LW.autotest.frame();
 
     acc += frameDt;
-    var steps = 0, maxSteps = LW.autotest.active ? 60 : LW.MAX_STEPS;
+    var steps = 0, maxSteps = LW.MAX_STEPS;
     var t0 = performance.now();
     while (acc >= DT && steps < maxSteps) {
       if (g.state === 'PLAYING') update(DT);

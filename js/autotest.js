@@ -1,5 +1,6 @@
 // 자동 검사 모드: ?autotest=N
 // 오류를 모으고, 플레이어를 자동으로 움직이고, N초가 지나면 결과 JSON을 <pre id="autotest">에 쓴다.
+// 결과 JSON: ok는 "수집된 오류가 없음", reached는 "목표 시각에 도달했거나 승리", died는 "사망으로 끝남"이다.
 // 보조 옵션: &start=초(그 시각부터 시작, N은 그 뒤로 더 돌 시간), &build=all|alt(시작 빌드와 자동 레벨업),
 //           &god=1(무적), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
 (function () {
@@ -158,6 +159,8 @@
     var p = LW.perf || {};
     var res = {
       ok: at.errors.length === 0,
+      reached: !!g.won || (g.time || 0) >= at.endTime - 1e-6,
+      died: g.state === 'RESULT' && !g.won,
       errors: at.errors,
       gameTime: round(g.time || 0, 2),
       level: g.level || 0,

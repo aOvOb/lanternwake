@@ -43,7 +43,7 @@ done
 "$CHROME" --headless=new --disable-gpu \
   --user-data-dir="$TMP/profile" --window-size=412,915 \
   --virtual-time-budget="$BUDGET" --dump-dom \
-  "http://localhost:$PORT/index.html?autotest=$SECS&nosw=1&snap=$SECS_LIST$SNAP_QUERY" \
+  "http://127.0.0.1:$PORT/index.html?autotest=$SECS&nosw=1&snap=$SECS_LIST$SNAP_QUERY" \
   >"$TMP/dom.html" 2>/dev/null
 
 python -I - "$TMP/dom.html" "$OUT" <<'EOF'
