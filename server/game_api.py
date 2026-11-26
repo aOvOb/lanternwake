@@ -8,17 +8,20 @@
 환경 변수: GOOGLE_CLIENT_ID(serve 필수), PUBLIC_ORIGIN, DATA, BOUNDS
 """
 import base64
+import bisect
 import hashlib
 import hmac
 import json
 import math
 import mimetypes
 import os
+import re
 import secrets
 import sqlite3
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
@@ -283,6 +286,8 @@ class App:
         os.makedirs(cfg.data, exist_ok=True)
         self.db = Db(os.path.join(cfg.data, "game.db"))
         self.pepper = load_pepper(cfg.data)
+        self.bounds = load_bounds(cfg.bounds_path)
+        self.boards = {}          # 순위표 캐시: board -> (만든 시각, 상위 100개)
         self.jwks = JwksCache(jwks_fetch or fetch_jwks_http, lambda: self.clock())
         self.buckets = Buckets(lambda: self.clock())
         self.stop_event = threading.Event()
@@ -497,7 +502,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def process(self, app, method):
         path, _, qs = self.path.partition("?")
-        query = {k: v[0] for k, v in urllib.parse.parse_qs(qs, max_num_fields=20).items()}
+        query = {k: v[0] for k, v in urllib.parse.parse_qs(qs, keep_blank_values=True, max_num_fields=20).items()}
         req = Req(app, method, path, query, self.headers, self.client_ip())
 
         if not path.startswith("/api/"):
@@ -966,8 +971,538 @@ def h_me_delete(app, req):
         raise ApiError(400, "bad_request")
     with app.db.tx() as c:
         c.execute("DELETE FROM users WHERE id=?", (req.user["id"],))
+    app.boards.clear()
     req.extra_headers[:] = []
     return Resp(200, {"ok": True}, [session_cookie_header(app.cfg, "", 0)])
+
+
+# ---------------------------------------------------------------- 검사 기준(bounds.json)
+
+class Bounds:
+    """server/bounds.json을 읽어 판 검사에 쓰는 표를 만든다(DESIGN-ACCOUNT.md 6.2)."""
+
+    def __init__(self, d):
+        try:
+            self.win_ms = int(d["winMs"])
+            self.max_level = int(d["maxLevel"])
+            self.last_boss_ms = d["lastBossT"] * 1000
+            self.xp_to_reach = [int(v) for v in d["xpToReach"]]
+            self.kpm_max = [int(v) for v in d["kpmMax"]]
+            self.min_ranked = parse_version(d["minRankedVersion"])
+            elites = sorted((float(t) * 1000, int(n)) for t, n in d["elites"])
+            bosses = sorted(float(t) * 1000 for t in d["bosses"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError("bounds.json 형식 오류: %r" % (e,))
+        if self.min_ranked is None or len(self.xp_to_reach) <= self.max_level or len(self.kpm_max) != MAX_MINUTES:
+            raise ValueError("bounds.json 값 오류")
+        self.elite_times = [t for t, _ in elites]
+        self.elite_cum = [0]
+        for _, n in elites:
+            self.elite_cum.append(self.elite_cum[-1] + n)
+        self.boss_times = bosses
+
+    def elites_before(self, t_ms):
+        """t_ms까지 등장한 엘리트 마릿수 합."""
+        return self.elite_cum[bisect.bisect_right(self.elite_times, t_ms)]
+
+    def bosses_before(self, t_ms):
+        return bisect.bisect_right(self.boss_times, t_ms)
+
+
+def load_bounds(path):
+    with open(path, encoding="utf-8") as f:
+        return Bounds(json.load(f))
+
+
+VERSION_RE = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}")
+MAX_MINUTES = 15
+MIN_RANKED_MS = 30000
+TICKET_TTL = 14 * 86400
+TICKET_MAX_UNUSED = 6
+TICKET_MAX_COUNT = 5
+RUN_BATCH_MAX = 20
+INT_CAP = 2 ** 62
+
+
+def parse_version(text):
+    if not isinstance(text, str) or not VERSION_RE.fullmatch(text):
+        return None
+    return tuple(int(p) for p in text.split("."))
+
+
+def is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def clamp_int(v):
+    return max(-INT_CAP, min(INT_CAP, v)) if is_int(v) else 0
+
+
+# ---------------------------------------------------------------- 판 검사
+
+def check_run(b, r):
+    """통계 검사. 실패하면 검사 이름, 통과하면 None. r은 parse_run이 만든 dict."""
+    t = r["time_ms"]
+    if not (0 < t <= b.win_ms) or r["kills"] < 0 or not (1 <= r["level"] <= b.max_level) \
+            or r["elites"] < 0 or r["bosses"] < 0:
+        return "range"
+    if r["won"]:
+        if t != b.win_ms:
+            return "win"
+    elif t >= b.win_ms:
+        return "win"
+    if r["full_dawn"] and (not r["won"] or r["bosses"] < 1 or t <= b.last_boss_ms):
+        return "dawn"
+    if r["elites"] > b.elites_before(t) or r["bosses"] > b.bosses_before(t):
+        return "events"
+    minutes = -(-t // 60000)
+    kpm, lvm = r["kpm"], r["lvm"]
+    if not (isinstance(kpm, list) and isinstance(lvm, list)) or len(kpm) != minutes or len(lvm) != minutes \
+            or minutes > MAX_MINUTES:
+        return "shape"
+    if not all(is_int(v) and 0 <= v <= 65535 for v in kpm) \
+            or not all(is_int(v) and 1 <= v <= b.max_level for v in lvm):
+        return "shape"
+    if sum(kpm) != r["kills"] or any(lvm[i] > lvm[i + 1] for i in range(minutes - 1)) or lvm[-1] != r["level"]:
+        return "shape"
+    if any(kpm[i] > b.kpm_max[i] for i in range(minutes)):
+        return "kpm"
+    cum = 0
+    for i in range(minutes):
+        cum += kpm[i]
+        end_ms = min((i + 1) * 60000, t)
+        cap = 5 * cum + 20 * b.elites_before(end_ms) + 100 * b.bosses_before(end_ms)
+        if b.xp_to_reach[lvm[i]] > cap:
+            return "xp"
+    return None
+
+
+def parse_run(raw):
+    """JSON 한 판을 내부 dict로 바꾼다. 형식이 틀리면 (None, 사유)."""
+    if not isinstance(raw, dict):
+        return None, "shape"
+    cid = raw.get("clientRunId")
+    if not isinstance(cid, str) or not CLIENT_RUN_ID_RE.fullmatch(cid):
+        return None, "client_run_id"
+    ticket = raw.get("ticket")
+    if ticket is not None and (not isinstance(ticket, str) or len(ticket) > 64):
+        ticket = ""      # 알아볼 수 없는 표는 없는 표로 취급(no_ticket)
+    r = {"cid": cid, "ticket": ticket or None, "ver": raw.get("ver"), "bad": None}
+    for key, name in (("timeMs", "time_ms"), ("kills", "kills"), ("level", "level"),
+                      ("elites", "elites"), ("bosses", "bosses")):
+        r[name] = raw.get(key)
+        if not is_int(r[name]):
+            r["bad"] = "range"
+    for key, name in (("won", "won"), ("fullDawn", "full_dawn")):
+        r[name] = raw.get(key)
+        if not isinstance(r[name], bool):
+            r["bad"] = "range"
+    r["kpm"], r["lvm"] = raw.get("kpm"), raw.get("lvm")
+    if r["bad"] is None and parse_version(r["ver"]) is None:
+        r["bad"] = "ver"
+    return r, None
+
+
+CLIENT_RUN_ID_RE = re.compile(r"[A-Za-z0-9-]{8,64}")
+
+
+def clean_list(v):
+    if not isinstance(v, list):
+        return []
+    return [x for x in v[:20] if is_int(x) and abs(x) < 2 ** 31]
+
+
+def user_ranks(c, user_id):
+    """두 보드에서의 내 순위(1부터). 기록이 없는 보드는 키를 뺀다."""
+    out = {}
+    for board in ("time", "kills"):
+        rk = rank_of(c, board, user_id)
+        if rk is not None:
+            out[board] = rk
+    return out
+
+
+def rank_of(c, board, user_id):
+    """best에서 나보다 좋은 행 수 + 1. 차단된 사용자와 숨긴 기록은 뺀다."""
+    me = c.execute("SELECT v1, v2, achieved_at FROM best WHERE user_id=? AND board=?", (user_id, board)).fetchone()
+    if me is None:
+        return None
+    v1, v2, at = me["v1"], me["v2"], me["achieved_at"]
+    n = c.execute(
+        "SELECT COUNT(*) FROM best b JOIN users u ON u.id=b.user_id JOIN runs r ON r.id=b.run_id"
+        " WHERE b.board=? AND u.banned=0 AND r.hidden=0 AND (b.v1>? OR (b.v1=? AND b.v2>?)"
+        " OR (b.v1=? AND b.v2=? AND b.achieved_at<?)"
+        " OR (b.v1=? AND b.v2=? AND b.achieved_at=? AND b.user_id<?))",
+        (board, v1, v1, v2, v1, v2, at, v1, v2, at, user_id)).fetchone()[0]
+    return n + 1
+
+
+def board_values(board, time_ms, kills):
+    """보드별 (v1, v2). 둘 다 큰 쪽이 좋다. kills 보드는 짧은 시간이 좋으므로 -time_ms."""
+    return (time_ms, kills) if board == "time" else (kills, -time_ms)
+
+
+def update_best(c, user_id, run_id, time_ms, kills, at):
+    for board in ("time", "kills"):
+        v1, v2 = board_values(board, time_ms, kills)
+        cur = c.execute("SELECT v1, v2 FROM best WHERE user_id=? AND board=?", (user_id, board)).fetchone()
+        if cur is None or (v1, v2) > (cur["v1"], cur["v2"]):
+            c.execute("INSERT OR REPLACE INTO best(user_id, board, run_id, v1, v2, achieved_at) VALUES(?,?,?,?,?,?)",
+                      (user_id, board, run_id, v1, v2, at))
+
+
+def rebuild_best(app, user_id=None):
+    """ranked이고 숨기지 않았고 minRankedVersion 이상인 판으로 best를 다시 만든다."""
+    min_ver = app.bounds.min_ranked
+    with app.db.tx() as c:
+        if user_id is None:
+            c.execute("DELETE FROM best")
+            rows = c.execute("SELECT id, user_id, ver, time_ms, kills, submitted_at FROM runs"
+                             " WHERE status='ranked' AND hidden=0 ORDER BY submitted_at, id").fetchall()
+        else:
+            c.execute("DELETE FROM best WHERE user_id=?", (user_id,))
+            rows = c.execute("SELECT id, user_id, ver, time_ms, kills, submitted_at FROM runs"
+                             " WHERE user_id=? AND status='ranked' AND hidden=0 ORDER BY submitted_at, id",
+                             (user_id,)).fetchall()
+        for r in rows:
+            v = parse_version(r["ver"])
+            if v is None or v < min_ver:
+                continue
+            update_best(c, r["user_id"], r["id"], r["time_ms"], r["kills"], r["submitted_at"])
+    app.boards.clear()
+
+
+def run_result(cid, status, reason=None, rank=None, first=None):
+    out = {"clientRunId": cid, "status": status}
+    if first is not None:
+        out["first"] = first
+    if reason is not None:
+        out["reason"] = reason
+    if rank:
+        out["rank"] = rank
+    return out
+
+
+def process_run(app, c, user_id, raw, now):
+    """한 판을 검사하고 저장한다. c는 열린 트랜잭션이다. 결과 dict를 돌려준다."""
+    r, why = parse_run(raw)
+    if r is None:
+        cid = raw.get("clientRunId") if isinstance(raw, dict) else None
+        return run_result(cid[:64] if isinstance(cid, str) else None, "rejected", why)
+    cid = r["cid"]
+    old = c.execute("SELECT id, status, reason FROM runs WHERE user_id=? AND client_run_id=?",
+                    (user_id, cid)).fetchone()
+    if old is not None:
+        rank = user_ranks(c, user_id) if old["status"] == "ranked" else None
+        return run_result(cid, "duplicate", old["reason"], rank, first=old["status"])
+
+    b = app.bounds
+    status, reason, ticket_age = None, None, None
+    reason = r["bad"] or check_run(b, r)
+    if reason:
+        status = "rejected"
+    elif parse_version(r["ver"]) < b.min_ranked:
+        status, reason = "unranked", "old_version"
+    elif r["time_ms"] < MIN_RANKED_MS:
+        status, reason = "unranked", "too_short"
+    elif r["ticket"] is None:
+        status, reason = "unranked", "no_ticket"
+    else:
+        t = c.execute("SELECT issued_at, expires_at, used_at FROM tickets WHERE id=? AND user_id=?",
+                      (r["ticket"], user_id)).fetchone()
+        if t is None or t["used_at"] is not None:
+            status, reason = "unranked", "no_ticket"
+        elif t["expires_at"] <= now:
+            status, reason = "unranked", "ticket_expired"
+        elif now - t["issued_at"] < r["time_ms"] / 1000.0 - 5:
+            status, reason = "rejected", "elapsed"
+        else:
+            # 표 사용 처리는 원자적으로. 이미 쓴 표면 갱신 행 수가 0이다.
+            cur = c.execute("UPDATE tickets SET used_at=? WHERE id=? AND used_at IS NULL", (now, r["ticket"]))
+            if cur.rowcount == 1:
+                status = "ranked"
+                ticket_age = now - t["issued_at"]
+            else:
+                status, reason = "unranked", "no_ticket"
+
+    detail = json.dumps({"kpm": clean_list(r["kpm"]), "lvm": clean_list(r["lvm"])}, separators=(",", ":"))
+    cur = c.execute(
+        "INSERT INTO runs(user_id, client_run_id, ticket_id, ticket_age_s, ver, time_ms, kills, level, won,"
+        " full_dawn, elites, bosses, detail, status, reason, hidden, submitted_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?)",
+        (user_id, cid, r["ticket"], ticket_age, r["ver"][:32] if isinstance(r["ver"], str) else "", clamp_int(r["time_ms"]),
+         clamp_int(r["kills"]), clamp_int(r["level"]), int(r["won"] is True), int(r["full_dawn"] is True),
+         clamp_int(r["elites"]), clamp_int(r["bosses"]), detail, status, reason, now))
+    run_id = cur.lastrowid
+    if status == "rejected":
+        return run_result(cid, status, reason)
+    c.execute(
+        "UPDATE records SET best_time_ms=MAX(best_time_ms,?), best_kills=MAX(best_kills,?),"
+        " best_level=MAX(best_level,?), wins=wins+?, runs=runs+1, full_dawns=full_dawns+?, updated_at=?"
+        " WHERE user_id=?",
+        (r["time_ms"], r["kills"], r["level"], int(r["won"]), int(r["full_dawn"]), now, user_id))
+    if status == "ranked":
+        update_best(c, user_id, run_id, r["time_ms"], r["kills"], now)
+        return run_result(cid, status, None, user_ranks(c, user_id))
+    return run_result(cid, status, reason)
+
+
+@route("POST", "/api/runs", login="required")
+def h_runs_submit(app, req):
+    body = req.json()
+    runs = body.get("runs")
+    if not isinstance(runs, list) or not 1 <= len(runs) <= RUN_BATCH_MAX:
+        raise ApiError(400, "bad_request")
+    uid = req.user["id"]
+    app.limit(uid, "runs")
+    now = app.now()
+    with app.db.tx() as c:
+        row = c.execute("SELECT COUNT(*) n, MIN(submitted_at) first FROM runs WHERE user_id=? AND submitted_at>?",
+                        (uid, now - 86400)).fetchone()
+        if row["n"] + len(runs) > RUNS_PER_DAY:
+            raise rate_limited(max(1, (row["first"] or now) + 86400 - now))
+        results = [process_run(app, c, uid, raw, now) for raw in runs]
+        rec = c.execute("SELECT * FROM records WHERE user_id=?", (uid,)).fetchone()
+    return Resp(200, {"results": results, "records": records_json(rec)})
+
+
+@route("POST", "/api/runs/tickets", login="required")
+def h_tickets(app, req):
+    count = req.json().get("count", 1)
+    if not is_int(count) or not 1 <= count <= TICKET_MAX_COUNT:
+        raise ApiError(400, "bad_request")
+    uid = req.user["id"]
+    app.limit(uid, "tickets")
+    now = app.now()
+    out = []
+    with app.db.tx() as c:
+        unused = c.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND used_at IS NULL AND expires_at>?",
+                           (uid, now)).fetchone()[0]
+        for _ in range(max(0, min(count, TICKET_MAX_UNUSED - unused))):
+            tid = secrets.token_urlsafe(16)
+            c.execute("INSERT INTO tickets(id, user_id, issued_at, expires_at) VALUES(?,?,?,?)",
+                      (tid, uid, now, now + TICKET_TTL))
+            out.append({"id": tid, "issuedAt": now, "expiresAt": now + TICKET_TTL})
+    return Resp(200, {"tickets": out})
+
+
+# ---------------------------------------------------------------- 닉네임, 설정, 가져오기
+
+NICK_RE = re.compile(r"[가-힣A-Za-z0-9_]{2,12}")
+AUTO_NICK_RE = re.compile(r"등불지기[0-9]*")
+RESERVED_NICKS = {"관리자", "운영자", "운영진", "admin", "administrator", "moderator", "system", "root",
+                  "lanternwake", "gm"}
+BANNED_WORDS = ("시발", "씨발", "병신", "개새끼", "지랄", "fuck", "shit", "bitch", "nigger", "nigga")
+NICK_COOLDOWN = 86400
+
+
+def normalize_nickname(text, admin=False):
+    """NFC로 정규화하고 규칙을 검사한다. (닉네임, 비교 키)를 돌려준다."""
+    if not isinstance(text, str):
+        raise ApiError(400, "invalid_nickname")
+    name = unicodedata.normalize("NFC", text)
+    if not NICK_RE.fullmatch(name):
+        raise ApiError(400, "invalid_nickname")
+    key = name.lower()
+    if not admin and (key in RESERVED_NICKS or AUTO_NICK_RE.fullmatch(key)
+                      or any(w in key for w in BANNED_WORDS)):
+        raise ApiError(400, "invalid_nickname")
+    return name, key
+
+
+@route("PUT", "/api/me/nickname", login="required")
+def h_nickname(app, req):
+    raw = req.json().get("nickname")
+    u = req.user
+    now = app.now()
+    if isinstance(raw, str) and unicodedata.normalize("NFC", raw) == u["nickname"]:
+        return Resp(200, {"nickname": u["nickname"]})      # 지금 이름 그대로면 아무 일도 없다
+    name, key = normalize_nickname(raw)
+    with app.db.tx() as c:
+        row = c.execute("SELECT nickname_set, nickname_changed_at FROM users WHERE id=?", (u["id"],)).fetchone()
+        if row["nickname_set"] and row["nickname_changed_at"] is not None \
+                and now - row["nickname_changed_at"] < NICK_COOLDOWN:
+            raise ApiError(429, "too_soon", [("Retry-After", str(row["nickname_changed_at"] + NICK_COOLDOWN - now))])
+        try:
+            c.execute("UPDATE users SET nickname=?, nickname_key=?, nickname_set=1, nickname_changed_at=? WHERE id=?",
+                      (name, key, now, u["id"]))
+        except sqlite3.IntegrityError:
+            raise ApiError(409, "nickname_taken")
+    app.boards.clear()
+    return Resp(200, {"nickname": name})
+
+
+@route("PUT", "/api/me/settings", login="required")
+def h_settings(app, req):
+    body = req.json()
+    st, rev = body.get("settings"), body.get("rev")
+    if not isinstance(st, dict) or not is_int(rev) or not 0 <= rev <= 2 ** 53 \
+            or any(not isinstance(st.get(k), bool) for k in DEFAULT_SETTINGS):
+        raise ApiError(400, "bad_request")
+    uid = req.user["id"]
+    app.limit(uid, "settings")
+    clean = {k: st[k] for k in DEFAULT_SETTINGS}
+    with app.db.tx() as c:
+        cur = c.execute("SELECT json, rev FROM settings WHERE user_id=?", (uid,)).fetchone()
+        if cur is None or rev > cur["rev"]:
+            if cur is None and rev == 0:
+                return Resp(200, {"settings": dict(DEFAULT_SETTINGS), "rev": 0})
+            c.execute("INSERT OR REPLACE INTO settings(user_id, json, rev, updated_at) VALUES(?,?,?,?)",
+                      (uid, json.dumps(clean, separators=(",", ":")), rev, app.now()))
+            return Resp(200, {"settings": clean, "rev": rev})
+        return Resp(200, {"settings": json.loads(cur["json"]), "rev": cur["rev"]})
+
+
+IMPORT_CAPS = {"bestKills": 1000000, "bestLevel": 200, "wins": 1000000, "runs": 1000000, "fullDawns": 1000000}
+
+
+@route("POST", "/api/me/import", login="required")
+def h_import(app, req):
+    rec = req.json().get("records")
+    if not isinstance(rec, dict):
+        raise ApiError(400, "bad_request")
+    vals = {}
+    for key, cap in IMPORT_CAPS.items():
+        v = rec.get(key, 0)
+        if not is_int(v) or v < 0:
+            raise ApiError(400, "bad_request")
+        vals[key] = min(v, cap)
+    bt = rec.get("bestTime", 0)
+    if not is_number(bt) or bt < 0 or bt != bt or bt == float("inf"):
+        raise ApiError(400, "bad_request")
+    vals["bestTimeMs"] = min(int(round(bt * 1000)), app.bounds.win_ms)
+    uid = req.user["id"]
+    with app.db.tx() as c:
+        if c.execute("SELECT imported FROM users WHERE id=?", (uid,)).fetchone()["imported"]:
+            raise ApiError(409, "already_imported")
+        c.execute(
+            "UPDATE records SET best_time_ms=MAX(best_time_ms,?), best_kills=MAX(best_kills,?),"
+            " best_level=MAX(best_level,?), wins=wins+?, runs=runs+?, full_dawns=full_dawns+?, updated_at=?"
+            " WHERE user_id=?",
+            (vals["bestTimeMs"], vals["bestKills"], vals["bestLevel"], vals["wins"], vals["runs"],
+             vals["fullDawns"], app.now(), uid))
+        c.execute("UPDATE users SET imported=1 WHERE id=?", (uid,))
+        merged = c.execute("SELECT * FROM records WHERE user_id=?", (uid,)).fetchone()
+    return Resp(200, {"records": records_json(merged)})
+
+
+# ---------------------------------------------------------------- 순위표
+
+BOARD_CACHE_SEC = 30
+BOARD_MAX = 100
+BOARD_DEFAULT = 50
+
+
+@route("GET", "/api/leaderboard", login="optional")
+def h_leaderboard(app, req):
+    board = req.query.get("board", "time")
+    if board not in ("time", "kills"):
+        raise ApiError(400, "bad_request")
+    ls = req.query.get("limit", str(BOARD_DEFAULT))
+    if not ls.isdigit() or len(ls) > 6 or int(ls) < 1:
+        raise ApiError(400, "bad_request")
+    limit = min(int(ls), BOARD_MAX)
+    now = app.now()
+    cached = app.boards.get(board)
+    if cached is None or now - cached[0] >= BOARD_CACHE_SEC:
+        with app.db.read() as c:
+            rows = c.execute(
+                "SELECT u.nickname, r.time_ms, r.kills, r.level, r.full_dawn, b.achieved_at FROM best b"
+                " JOIN users u ON u.id=b.user_id JOIN runs r ON r.id=b.run_id"
+                " WHERE b.board=? AND u.banned=0 AND r.hidden=0"
+                " ORDER BY b.v1 DESC, b.v2 DESC, b.achieved_at ASC, b.user_id ASC LIMIT ?",
+                (board, BOARD_MAX)).fetchall()
+        entries = [{"rank": i + 1, "nickname": r["nickname"], "timeMs": r["time_ms"], "kills": r["kills"],
+                    "level": r["level"], "fullDawn": bool(r["full_dawn"]), "at": r["achieved_at"]}
+                   for i, r in enumerate(rows)]
+        cached = (now, entries)
+        app.boards[board] = cached
+    out = {"board": board, "updatedAt": cached[0], "entries": cached[1][:limit]}
+    u = req.user
+    if u is not None and not u["banned"]:
+        with app.db.read() as c:
+            rk = rank_of(c, board, u["id"])
+            if rk is not None:
+                r = c.execute("SELECT r.time_ms, r.kills FROM best b JOIN runs r ON r.id=b.run_id"
+                              " WHERE b.user_id=? AND b.board=?", (u["id"], board)).fetchone()
+                out["me"] = {"rank": rk, "timeMs": r["time_ms"], "kills": r["kills"]}
+    return Resp(200, out)
+
+
+# ---------------------------------------------------------------- 관리 작업(CLI)
+
+def set_run_hidden(app, run_id, hidden):
+    with app.db.tx() as c:
+        row = c.execute("SELECT user_id FROM runs WHERE id=?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError("판 %d 없음" % run_id)
+        c.execute("UPDATE runs SET hidden=? WHERE id=?", (1 if hidden else 0, run_id))
+    rebuild_best(app, row["user_id"])
+    return row["user_id"]
+
+
+def set_user_banned(app, user_id, banned):
+    with app.db.tx() as c:
+        cur = c.execute("UPDATE users SET banned=? WHERE id=?", (1 if banned else 0, user_id))
+        if cur.rowcount != 1:
+            raise KeyError("사용자 %d 없음" % user_id)
+    app.boards.clear()
+
+
+def rename_user(app, user_id, nickname):
+    """관리자 이름 바꾸기. 예약어와 금칙어는 건너뛰고 형식과 중복만 본다."""
+    try:
+        name, key = normalize_nickname(nickname, admin=True)
+    except ApiError:
+        raise ValueError("닉네임 형식이 맞지 않음(2~12자, 한글, 영문, 숫자, _)")
+    with app.db.tx() as c:
+        try:
+            cur = c.execute("UPDATE users SET nickname=?, nickname_key=?, nickname_set=1 WHERE id=?",
+                            (name, key, user_id))
+        except sqlite3.IntegrityError:
+            raise ValueError("이미 쓰는 닉네임")
+        if cur.rowcount != 1:
+            raise KeyError("사용자 %d 없음" % user_id)
+    app.boards.clear()
+
+
+def find_suspects(app):
+    """분당 처치가 상위 0.1%인 판, 미리 받은 표로 1위가 된 판을 모은다(DESIGN-ACCOUNT.md 6.2)."""
+    with app.db.read() as c:
+        rows = c.execute(
+            "SELECT r.id, r.user_id, u.nickname, r.time_ms, r.kills, r.detail, r.ticket_age_s FROM runs r"
+            " JOIN users u ON u.id=r.user_id WHERE r.status='ranked' AND r.hidden=0 AND u.banned=0").fetchall()
+        top = {}
+        for board in ("time", "kills"):
+            first = c.execute(
+                "SELECT b.run_id FROM best b JOIN users u ON u.id=b.user_id JOIN runs r ON r.id=b.run_id"
+                " WHERE b.board=? AND u.banned=0 AND r.hidden=0"
+                " ORDER BY b.v1 DESC, b.v2 DESC, b.achieved_at ASC, b.user_id ASC LIMIT 1", (board,)).fetchone()
+            if first is not None:
+                top.setdefault(first["run_id"], []).append(board)
+    peak = {}
+    for r in rows:
+        kpm = json.loads(r["detail"]).get("kpm") or [0]
+        peak[r["id"]] = max(kpm)
+    out = []
+    if rows:
+        vals = sorted(peak.values())
+        cutoff = vals[min(len(vals) - 1, int(math.ceil(0.999 * len(vals))) - 1)]
+        for r in rows:
+            why = []
+            if peak[r["id"]] >= cutoff:
+                why.append("kpm_top")
+            age = r["ticket_age_s"]
+            if r["id"] in top and age is not None and age - r["time_ms"] / 1000.0 > PRE_TICKET_SLACK_SEC:
+                why.extend("pre_ticket_rank1_" + board for board in top[r["id"]])
+            if why:
+                out.append({"runId": r["id"], "userId": r["user_id"], "nickname": r["nickname"],
+                            "timeMs": r["time_ms"], "kills": r["kills"], "peakKpm": peak[r["id"]],
+                            "ticketAgeS": age, "why": why})
+    return out
+
+
+PRE_TICKET_SLACK_SEC = 3600   # 표를 받은 지 판 길이보다 1시간 넘게 지났으면 미리 받은 표로 본다
 
 
 # ---------------------------------------------------------------- CLI
@@ -1028,10 +1563,74 @@ def cmd_stats(args):
         app.close()
 
 
-COMMANDS = {"serve": cmd_serve, "stats": cmd_stats}
+def with_admin_app(fn):
+    app = open_admin_app()
+    try:
+        return fn(app)
+    except (KeyError, ValueError) as e:
+        sys.exit("오류: %s" % (e.args[0] if e.args else e))
+    finally:
+        app.close()
+
+
+def need_int(args, n):
+    if len(args) != n or not all(a.lstrip("-").isdigit() for a in args[:1]):
+        sys.exit("인자가 맞지 않습니다.\n" + __doc__)
+    return int(args[0])
+
+
+def cmd_suspects(args):
+    def run(app):
+        rows = find_suspects(app)
+        for r in rows:
+            print("run=%d user=%d %s time=%dms kills=%d peakKpm=%d ticketAge=%s %s" % (
+                r["runId"], r["userId"], r["nickname"], r["timeMs"], r["kills"], r["peakKpm"],
+                r["ticketAgeS"], ",".join(r["why"])))
+        print("의심 기록 %d개" % len(rows))
+    with_admin_app(run)
+
+
+def cmd_hide(args, hidden=True):
+    rid = need_int(args, 1)
+    uid = with_admin_app(lambda app: set_run_hidden(app, rid, hidden))
+    print("판 %d %s (사용자 %d의 best를 다시 만듦)" % (rid, "숨김" if hidden else "숨김 해제", uid))
+
+
+def cmd_unhide(args):
+    cmd_hide(args, False)
+
+
+def cmd_ban(args, banned=True):
+    uid = need_int(args, 1)
+    with_admin_app(lambda app: set_user_banned(app, uid, banned))
+    print("사용자 %d %s" % (uid, "차단" if banned else "차단 해제"))
+
+
+def cmd_unban(args):
+    cmd_ban(args, False)
+
+
+def cmd_rename(args):
+    if len(args) != 2 or not args[0].isdigit():
+        sys.exit("사용법: rename <userId> <닉네임>")
+    with_admin_app(lambda app: rename_user(app, int(args[0]), args[1]))
+    print("사용자 %s 닉네임을 %s로 바꿈" % (args[0], args[1]))
+
+
+def cmd_rebuild_best(args):
+    with_admin_app(lambda app: rebuild_best(app))
+    print("best를 다시 만듦")
+
+
+COMMANDS = {"serve": cmd_serve, "stats": cmd_stats, "suspects": cmd_suspects, "hide": cmd_hide,
+            "unhide": cmd_unhide, "ban": cmd_ban, "unban": cmd_unban, "rename": cmd_rename,
+            "rebuild-best": cmd_rebuild_best}
 
 
 def main(argv=None):
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")     # 컨테이너 로케일과 상관없이 한글이 깨지지 않게
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] not in COMMANDS:
         sys.exit(__doc__)

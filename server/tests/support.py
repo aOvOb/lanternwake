@@ -99,9 +99,14 @@ class FakeClock:
 
     def __init__(self):
         self.offset = 0.0
+        self.frozen = None
 
     def __call__(self):
-        return time.time() + self.offset
+        return time.time() + self.offset if self.frozen is None else self.frozen
+
+    def freeze(self):
+        """지금 시각에서 멈춘다. 요청 제한을 정확히 세는 시험에 쓴다."""
+        self.frozen = self()
 
     def advance(self, seconds):
         self.offset += seconds
