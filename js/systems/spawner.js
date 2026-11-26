@@ -39,6 +39,14 @@
     e.x = pt.x; e.y = pt.y; e.kbX = 0; e.kbY = 0;
   };
 
+  // 엘리트 한 마리를 시야 테두리에 만든다
+  sp.spawnElite = function (defId) {
+    borderPoint();
+    var e = LW.enemies.spawnEnemy(defId, pt.x, pt.y, LW.game.time / 60);
+    if (e) LW.enemies.makeElite(e);
+    return e;
+  };
+
   function spawnOne(w, minutes) {
     borderPoint();
     var id = w.ids[LW.weightedPick(w.ws, w.total)];

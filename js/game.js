@@ -5,7 +5,7 @@
   var g = LW.game = {
     state: 'TITLE',
     time: 0, kills: 0, level: 1, xp: 0, xpNeed: LW.xpReq(1), pending: 0,
-    weapons: [], passives: [], dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
+    weapons: [], passives: [], chestN: 0, chestB: 0, chestsOpened: 0, bossesSeen: [], dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
     god: false, won: false
   };
   var perf = LW.perf = {
@@ -30,6 +30,8 @@
     g.god = LW.params.stress || LW.params.god;
     g.dmgBySlot.fill(0);
     g.passives = [];
+    g.chestN = 0; g.chestB = 0; g.chestsOpened = 0;
+    g.bossesSeen = [];
     LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset();
     LW.gems.reset(); LW.pickups.reset(); LW.effects.reset();
     LW.player.reset();
@@ -56,6 +58,9 @@
       g.pending++;
     }
   };
+
+  // 상자를 받는다. 실제로 여는 것은 갱신 11단계다.
+  g.giveChest = function (boss) { if (boss) g.chestB++; else g.chestN++; };
 
   g.end = function (won) {
     g.won = !!won;
@@ -94,6 +99,8 @@
     if (LW.enemies.n > perf.maxEnemies) perf.maxEnemies = LW.enemies.n;
     if (P.hp <= 0) { g.end(false); return; }
     if (g.pending > 0) LW.levelup.open();  // 11
+    else if (g.chestB > 0) { g.chestB--; LW.chest.open(true); }
+    else if (g.chestN > 0) { g.chestN--; LW.chest.open(false); }
   }
 
   // 헤드리스의 가상 시간에서는 rAF가 거의 돌지 않으므로, 자동 검사 때만 타이머로 돌린다

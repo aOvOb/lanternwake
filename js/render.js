@@ -264,6 +264,29 @@
     }
   }
 
+  // 상자: 갈색 상자와 금색 걸쇠. 보스 상자는 보라색에 더 크다
+  function drawChests(ctx, l, r, t, b) {
+    var items = LW.pickups.items, n = LW.pickups.n;
+    for (var i = 0; i < n; i++) {
+      var it = items[i];
+      if (it.x < l || it.x > r || it.y < t || it.y > b) continue;
+      var boss = it.kind === 1, k = boss ? 1.5 : 1, bob = Math.sin(R.time * 3 + it.x) * 1.5;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.6;
+      ctx.drawImage(R.glow, it.x - 28 * k, it.y - 28 * k + bob, 56 * k, 56 * k);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      var w = 18 * k, h = 13 * k, x = it.x - w / 2, y = it.y - h / 2 + bob;
+      roundRect(ctx, x, y, w, h, 2.5);
+      ctx.fillStyle = boss ? '#6a3a8a' : '#8a5a34'; ctx.fill();
+      ctx.lineWidth = 1.6; ctx.strokeStyle = '#2b1a0e'; ctx.stroke();
+      ctx.fillStyle = boss ? '#4a2866' : '#6e4524';
+      ctx.fillRect(x + 1, y + 1, w - 2, h * 0.35);
+      ctx.fillStyle = '#ffd34d';
+      ctx.fillRect(it.x - 2 * k, y + h * 0.3, 4 * k, 5 * k);
+    }
+  }
+
   function drawEnemies(ctx, g, l, r, t, b) {
     var items = LW.enemies.items, n = LW.enemies.n;
     var frameBase = (g.time * 6) | 0;
@@ -273,6 +296,11 @@
       var d = e.def;
       var spr = d.spr[e.flashT > 0 ? 2 : ((frameBase + e.uid) & 1)];
       var half = d.sprHalf * (e.r / d.r);
+      if (e.elite) {
+        ctx.beginPath(); ctx.ellipse(e.x, e.y + e.r * 0.4, e.r * 1.25, e.r * 0.95, 0, 0, TAU);
+        ctx.fillStyle = 'rgba(255,211,77,0.18)'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = '#ffd34d'; ctx.stroke();
+      }
       ctx.drawImage(spr, e.x - half, e.y - half, half * 2, half * 2);
       if (e.hp < e.maxHp) {
         var bw = e.r * 2, by = e.y - e.r - 7;
@@ -517,6 +545,7 @@
     ctx.fillRect(cam.x - v.w / 2, cam.y - v.h / 2, v.w, v.h);
     drawAreas(ctx, l, r, t, b);
     drawGems(ctx, g, l, r, t, b);
+    drawChests(ctx, l, r, t, b);
     drawEnemies(ctx, g, l, r, t, b);
     drawPlayer(ctx, g);
     drawWeaponFx(ctx, g);

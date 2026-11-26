@@ -5,9 +5,9 @@
   function make() {
     return {
       active: false, uid: 0, def: null, x: 0, y: 0, vx: 0, vy: 0, r: 8,
-      hp: 1, maxHp: 1, speed: 0, dmg: 0, xp: 0, elite: false, boss: false,
+      hp: 1, maxHp: 1, speed: 0, dmg: 0, xp: 0, elite: false, boss: false, special: false,
       kbRes: 0, kbX: 0, kbY: 0, slowT: 0, slowMul: 1, freezeT: 0, flashT: 0,
-      aiState: 0, aiT: 0, hitCd: new Float32Array(6)
+      aiState: 0, aiT: 0, aiT2: 0, ax: 0, ay: 0, hitCd: new Float32Array(6)
     };
   }
   var pool = LW.enemies = LW.makePool(LW.POOL.enemies, make);
@@ -24,11 +24,20 @@
     e.speed = d.speed;
     e.dmg = d.dmg * (1 + 0.05 * minutes);
     e.xp = d.xp;
-    e.elite = false; e.boss = false;
+    e.elite = false; e.boss = false; e.special = false;
     e.kbRes = d.kbRes; e.kbX = 0; e.kbY = 0;
     e.slowT = 0; e.slowMul = 1; e.freezeT = 0; e.flashT = 0;
-    e.aiState = 0; e.aiT = 0;
+    e.aiState = 0; e.aiT = 0; e.aiT2 = 0; e.ax = 0; e.ay = 0;
     e.hitCd.fill(0);
+    return e;
+  };
+
+  // 엘리트 보정: HP x12, 반경 x1.5, 접촉 피해 x1.5, 속도 x0.9, XP 20, 넉백 저항 0.8. 상한과 무관한 특수 적이다.
+  pool.makeElite = function (e) {
+    e.elite = true; e.special = true;
+    e.maxHp *= 12; e.hp = e.maxHp;
+    e.r *= 1.5; e.dmg *= 1.5; e.speed *= 0.9;
+    e.xp = 20; e.kbRes = 0.8;
     return e;
   };
 

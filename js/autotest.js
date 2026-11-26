@@ -38,6 +38,12 @@
   at.tick = function (dt) {
     at.angle += dt * 0.5;
     dir.x = Math.cos(at.angle); dir.y = Math.sin(at.angle);
+    // 상자가 떨어져 있으면 가장 가까운 상자 쪽으로 간다(상자 획득 경로 검사)
+    var pk = LW.pickups, P = LW.player, best = 1e12;
+    for (var i = 0; i < pk.n; i++) {
+      var dx = pk.items[i].x - P.x, dy = pk.items[i].y - P.y, d2 = dx * dx + dy * dy;
+      if (d2 < best && d2 < 640000) { best = d2; var d = Math.sqrt(d2) || 1; dir.x = dx / d; dir.y = dy / d; }
+    }
     LW.input.auto = dir;
   };
 
@@ -78,6 +84,20 @@
     LW.player.recomputeStats();
   };
 
+  var eliteT = 0, eliteRR = 0;
+  // &elite=1: 15초마다 엘리트를 하나 만든다(엘리트, 상자 경로 검사용)
+  function eliteStep(g, dt) {
+    if (!LW.params.elite) return;
+    eliteT += dt;
+    if (eliteT < 15) return;
+    eliteT -= 15;
+    var ids = ['mite', 'moth', 'mudling', 'spore', 'rusthelm', 'eye', 'boar'], tries = 0, id;
+    while (tries++ < ids.length) {
+      id = ids[eliteRR++ % ids.length];
+      if (LW.ENEMIES[id]) { LW.spawner.spawnElite(id); return; }
+    }
+  }
+
   // 2초마다 무기 하나의 레벨을 올린다. 진화 조건이 갖춰진 무기가 있으면 상자를 지급한다.
   function buildStep(g, dt) {
     if (!buildCfg) return;
@@ -114,16 +134,19 @@
     } else if (g.state === 'LEVELUP') {
       if (performance.now() - LW.levelup.openedAt >= 500) LW.levelup.choose(0);
     } else if (g.state === 'CHEST') {
-      if (performance.now() - LW.chest.openedAt >= 500) LW.chest.close();
+      var age = performance.now() - LW.chest.openedAt;
+      // 상자 창이 열려 있을 때 스냅샷 시각이 지났다면(&snapchest=1이면 시각과 상관없이 다음 스냅샷을) 창이 그려진 뒤에 찍는다
+      if (age >= 150 && snapIdx < snaps.length && (LW.params.snapChest || g.time >= snaps[snapIdx])) takeSnap(snaps[snapIdx++]);
+      if (age >= 500) LW.chest.close();
     }
-    if (g.state === 'PLAYING') {
+    if (g.state === 'PLAYING' && !LW.params.snapChest) {
       while (snapIdx < snaps.length && g.time >= snaps[snapIdx]) takeSnap(snaps[snapIdx++]);
     }
     if (g.time >= at.endTime || g.state === 'RESULT') at.finish();
   };
 
   // 프레임이 아니라 게임 시간 1스텝마다 호출(game.update에서)
-  at.step = function (dt) { buildStep(LW.game, dt); };
+  at.step = function (dt) { buildStep(LW.game, dt); eliteStep(LW.game, dt); };
 
   function round(v, k) { var m = Math.pow(10, k); return Math.round(v * m) / m; }
 

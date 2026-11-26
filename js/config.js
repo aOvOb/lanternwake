@@ -16,6 +16,8 @@ window.LW = window.LW || {};
     autotest: Math.max(0, Number(q.get('autotest')) || 0),
     // 자동 검사 보조 옵션: god=1 무적, build=all|alt 시작 빌드, start=초 시간 건너뛰기, snap=게임 초 목록
     god: q.get('god') === '1',
+    elite: q.get('elite') === '1',
+    snapChest: q.get('snapchest') === '1',
     build: q.get('build') || '',
     start: Math.max(0, Number(q.get('start')) || 0),
     snap: (q.get('snap') || '').split(',').map(Number).filter(function (v) { return v > 0; })

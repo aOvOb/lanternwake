@@ -99,6 +99,8 @@
       var rh = Math.max(MIN, 52);
       addBtn('retry', v.w / 2 - 100, v.h * 0.62, 200, rh, '다시 하기', 3);
       addBtn('title', v.w / 2 - 100, v.h * 0.62 + rh + 12, 200, rh, '타이틀', 3);
+    } else if (st === 'CHEST') {
+      addBtn('chest_ok', 0, 0, v.w, v.h, '', 5);
     } else if (st === 'LEVELUP') {
       var n = LW.levelup.cands.length;
       cardN = n;
@@ -129,6 +131,7 @@
       case 'c0': LW.levelup.choose(0); break;
       case 'c1': LW.levelup.choose(1); break;
       case 'c2': LW.levelup.choose(2); break;
+      case 'chest_ok': LW.chest.close(); break;
       case 'd_time': g.time += 60; break;
       case 'd_lvl': g.addXp(g.xpNeed - g.xp); break;
       case 'd_ovl': ui.dbgOverlay = !ui.dbgOverlay; break;
@@ -146,6 +149,16 @@
     LW.player.recomputeStats();
   }
 
+  // 디버그 E키: 엘리트를 하나 만든다(있는 일반 적 종류를 차례로)
+  var dbgE = 0;
+  function dbgElite() {
+    var ids = ['mite', 'moth', 'mudling', 'spore', 'rusthelm', 'eye', 'boar'], k = 0, id;
+    for (var tries = 0; tries < ids.length; tries++) {
+      id = ids[dbgE++ % ids.length];
+      if (LW.ENEMIES[id]) { LW.spawner.spawnElite(id); return; }
+    }
+  }
+
   function handleKey(code) {
     var g = LW.game, st = g.state, lu = LW.levelup;
     if (LW.params.debug && code === 'F2') { ui.dbgOverlay = !ui.dbgOverlay; return; }
@@ -158,6 +171,8 @@
         else if (code === 'KeyT') g.time += 60;
         else if (code === 'KeyI') g.god = !g.god;
         else if (code === 'KeyW') dbgCycleWeapon();
+        else if (code === 'KeyE') dbgElite();
+        else if (code === 'KeyC') g.giveChest(false);
       }
     } else if (st === 'PAUSED') {
       if (code === 'Escape' || code === 'KeyP' || code === 'Enter') g.setState('PLAYING');
@@ -169,6 +184,8 @@
       else if (code === 'ArrowUp' || code === 'ArrowLeft') lu.focus = (lu.focus + n - 1) % n;
       else if (code === 'ArrowDown' || code === 'ArrowRight') lu.focus = (lu.focus + 1) % n;
       else if (code === 'Enter') lu.choose(lu.focus);
+    } else if (st === 'CHEST') {
+      if (code === 'Enter' || code === 'Space') LW.chest.close();
     } else if (st === 'RESULT') {
       if (code === 'Enter') g.start();
     }
@@ -338,6 +355,28 @@
     }
   }
 
+  // 상자 창: 결과 목록. 탭이나 Enter로 닫는다.
+  function drawChest(ctx) {
+    var ch = LW.chest, v = LW.view, res = ch.results, n = res.length;
+    dim(ctx, 0.7);
+    var rowH = 46, cw = Math.min(v.w - 32, 400);
+    var h = 70 + n * rowH + 40, x = (v.w - cw) / 2, y = v.h / 2 - h / 2;
+    rrect(ctx, x, y, cw, h, 14);
+    ctx.fillStyle = 'rgba(22,48,58,0.97)'; ctx.fill();
+    ctx.strokeStyle = ch.boss ? '#c48cf0' : '#ffd34d'; ctx.lineWidth = 2.5; ctx.stroke();
+    text(ctx, ch.boss ? '보스 상자' : '상자', v.w / 2, y + 32, 26, ch.boss ? '#e6c8ff' : '#ffe9a8');
+    for (var i = 0; i < n; i++) {
+      var r = res[i], ry = y + 70 + i * rowH + rowH / 2;
+      ctx.beginPath(); ctx.arc(x + 28, ry, 13, 0, TAU);
+      ctx.fillStyle = r.color; ctx.fill();
+      ctx.strokeStyle = '#0b1418'; ctx.lineWidth = 2; ctx.stroke();
+      text(ctx, r.text, x + 52, ry, 16, r.evo ? '#ffd34d' : '#ffffff', 'left');
+    }
+    ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(performance.now() / 400));
+    text(ctx, '탭하여 닫기', v.w / 2, y + h - 22, 14, '#c9d6da', 'center', 'normal');
+    ctx.globalAlpha = 1;
+  }
+
   function drawOwlBig(ctx, cx, cy, size, flame, blink, bob) {
     LW.drawOwl(ctx, cx, cy, size / 30, { facing: 0, bob: bob, flame: flame, blink: blink });
   }
@@ -379,10 +418,11 @@
     drawHud(ctx, g);
     if (st === 'PLAYING') drawJoystick(ctx);
     for (i = 0; i < nBtn && st !== 'LEVELUP'; i++) {
-      if (btns[i].id === 'resume' || btns[i].id === 'retry' || btns[i].id === 'title') continue;
+      if (btns[i].id === 'resume' || btns[i].id === 'retry' || btns[i].id === 'title' || btns[i].id === 'chest_ok') continue;
       drawButton(ctx, btns[i]);
     }
     if (st === 'LEVELUP') drawCards(ctx);
+    else if (st === 'CHEST') drawChest(ctx);
     else if (st === 'PAUSED') {
       dim(ctx, 0.6);
       text(ctx, '일시정지', v.w / 2, v.h / 2 - 70, 30, '#ffe9a8');

@@ -371,6 +371,7 @@
     e.active = false;
     g.kills++;
     LW.spawnGem(e.x, e.y, e.xp);
+    if (e.elite) LW.dropChest(e.x, e.y, false);
     var n = LW.quality.level === 0 ? 6 : (LW.quality.level === 1 ? 4 : 2);
     LW.effects.burst(e.x, e.y, n, 2);
   };
