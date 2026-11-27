@@ -3,7 +3,7 @@ window.LW = window.LW || {};
 (function () {
   var q = new URLSearchParams(location.search);
 
-  LW.VERSION = '1.0.0';
+  LW.VERSION = '1.0.1';
   LW.DT = 1 / 60;
   LW.MAX_STEPS = 4;
   LW.WIN_TIME = 900;
