@@ -120,8 +120,8 @@
   // 키보드
   var PREVENT = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1, Enter: 1, Escape: 1 };
   window.addEventListener('keydown', function (e) {
-    // 닉네임 입력란에서 치는 글자는 게임 키로 처리하지 않는다
-    if (e.target && e.target.id === 'nickIn') return;
+    // 닉네임 폼(입력란, 취소, 확인 버튼)의 키는 게임 키로 처리하지 않는다
+    if (e.target && e.target.closest && e.target.closest('#nick')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (PREVENT[e.code] || e.code.indexOf('Key') === 0 || e.code.indexOf('Digit') === 0) e.preventDefault();
     if (e.repeat) return;
