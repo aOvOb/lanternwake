@@ -5,21 +5,21 @@
 (function () {
   LW.EVOLUTIONS = [
     { id: 'sunlance', weapon: 'ember', passive: 'P2', name: '태양창 연사', color: '#ffb347',
-      L: { dmg: 30, cd: 0.9, n: 6, pierce: 5, interval: 0.05, r: 8, speed: 520, ring: 3 } },
+      L: { dmg: 22, cd: 0.9, n: 6, pierce: 5, interval: 0.05, r: 8, speed: 520, ring: 3 } },
     { id: 'lanternring', weapon: 'orbit', passive: 'P4', name: '영원의 등롱환', color: '#ffe27a',
-      L: { dmg: 35, n: 6, dur: 0, cd: 0, always: true, orbitR: 95, hitGap: 0.35 } },
+      L: { dmg: 26, n: 6, dur: 0, cd: 0, always: true, orbitR: 95, hitGap: 0.35 } },
     { id: 'sanctuary', weapon: 'halo', passive: 'P7', name: '정화의 성역', color: '#ffe9a8',
-      L: { dmg: 20, r: 120, tick: 0.4, slow: 0.3, regen: 1.5 } },
+      L: { dmg: 15, r: 120, tick: 0.4, slow: 0.3, regen: 1.5 } },
     { id: 'halfmoon', weapon: 'scythe', passive: 'P1', name: '혹한의 반달', color: '#bfeaff',
-      L: { dmg: 45, cd: 1.0, range: 140, n: 1, circle: true, freeze: 0.6 } },
+      L: { dmg: 34, cd: 1.0, range: 140, n: 1, circle: true, freeze: 0.6 } },
     { id: 'stormtower', weapon: 'bell', passive: 'P3', name: '폭풍 종탑', color: '#fff9b0',
-      L: { dmg: 45, cd: 1.8, n: 7, r: 60, chain: 2, chainR: 150, chainMul: 0.6 } },
+      L: { dmg: 34, cd: 1.8, n: 7, r: 60, chain: 2, chainR: 150, chainMul: 0.6 } },
     { id: 'bladestorm', weapon: 'disc', passive: 'P5', name: '칼날 폭풍', color: '#a8f0b8',
-      L: { dmg: 24, n: 6, r: 18, dur: 5.0, speed: 340, cd: 2.5, turn: 1.5 } },
+      L: { dmg: 18, n: 6, r: 18, dur: 5.0, speed: 340, cd: 2.5, turn: 1.5 } },
     { id: 'gluttonswamp', weapon: 'flask', passive: 'P8', name: '탐식의 늪', color: '#c48cf0',
-      L: { dmg: 16, r: 70, dur: 4.0, n: 4, cd: 3.5, pull: 60 } },
+      L: { dmg: 12, r: 70, dur: 4.0, n: 4, cd: 3.5, pull: 60 } },
     { id: 'burstgarden', weapon: 'seed', passive: 'P9', name: '폭화 정원', color: '#d2f06a',
-      L: { dmg: 60, r: 80, n: 5, cd: 2.0, mini: 3, miniR: 35, miniMul: 0.5 } }
+      L: { dmg: 45, r: 80, n: 5, cd: 2.0, mini: 3, miniR: 35, miniMul: 0.5 } }
   ];
   LW.EVO_BY_WEAPON = {};
   for (var i = 0; i < LW.EVOLUTIONS.length; i++) LW.EVO_BY_WEAPON[LW.EVOLUTIONS[i].weapon] = LW.EVOLUTIONS[i];
