@@ -177,9 +177,11 @@
 
     // 4) 예고 원: 터지는 시각의 위치가 원 안이면 크게 감점(군중을 뚫고 나가는 접촉 피해보다 확실한 큰 피해이므로 밀도 감점보다 훨씬 크게)
     items = LW.areas.items; n = LW.areas.n;
+    var teleBig = false;
     for (i = 0; i < n; i++) {
       var a = items[i];
       if (a.kind !== LW.AREA.TELE || a.life <= 0) continue;
+      if (a.r > 100) teleBig = true;
       var life = a.life + 0.05, rr = a.r + P.r * 0.5 + 4;
       for (k = 0; k < NDIR; k++) {
         var tx = P.x + COS[k] * sp * life - a.x, ty = P.y + SIN[k] * sp * life - a.y;
@@ -205,9 +207,11 @@
       }
     }
 
-    // 6) 흔들림을 줄이려고 직전 방향을 조금 선호
-    score[botPrev] += 0.4;
-    score[(botPrev + 1) % NDIR] += 0.2; score[(botPrev + NDIR - 1) % NDIR] += 0.2;
+    // 6) 흔들림을 줄이려고 직전 방향을 조금 선호. 큰 예고 원(잿더미 거인, 반경 110)은 빠져나갈 거리 여유가 4 단위뿐이라
+    //    방향을 바꾸면 못 나가므로, 예고 중에는 직전 방향을 강하게 유지한다.
+    var keep = teleBig ? 30 : 0.4;
+    score[botPrev] += keep;
+    score[(botPrev + 1) % NDIR] += keep / 2; score[(botPrev + NDIR - 1) % NDIR] += keep / 2;
     var best = botPrev;
     for (k = 0; k < NDIR; k++) if (score[k] > score[best]) best = k;
     botPrev = best;
