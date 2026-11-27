@@ -160,7 +160,7 @@
       }
     }
 
-    // 3) 적 탄: 방향 k로 가면 탄과 닿는지 0.15~0.8초 앞까지 본다
+    // 3) 적 탄: 방향 k로 가면 탄과 닿는지 0.1~1.2초 앞까지 본다(확실한 피해라 군중 감점보다 크게. 탄은 속도 170이라 플레이어보다 빨라 일찍 옆으로 비켜야 한다)
     items = LW.ebullets.items; n = LW.ebullets.n;
     for (i = 0; i < n; i++) {
       var b = items[i];
@@ -168,9 +168,9 @@
       if (dx * dx + dy * dy > 300 * 300) continue;
       var br = b.r + P.r + 8;
       for (k = 0; k < NDIR; k++) {
-        for (var t = 0.15; t <= 0.81; t += 0.15) {
+        for (var t = 0.1; t <= 1.21; t += 0.1) {
           var ex = b.x + b.vx * t - (P.x + COS[k] * sp * t), ey = b.y + b.vy * t - (P.y + SIN[k] * sp * t);
-          if (ex * ex + ey * ey < br * br) { score[k] -= 9 * (1.2 - t); break; }
+          if (ex * ex + ey * ey < br * br) { score[k] -= 28 * (1.5 - t); break; }
         }
       }
     }
