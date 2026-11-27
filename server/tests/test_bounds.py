@@ -85,6 +85,21 @@ class GenBoundsTest(unittest.TestCase):
         self.assertEqual(b["elites"], expect["elites"])
         self.assertEqual(b["bosses"], expect["bosses"])
 
+    def test_committed_bounds_json_matches_current_game_data(self):
+        """리뷰 2 B1: 커밋된 server/bounds.json의 자동 영역이 지금 게임 데이터(config, util, waves)에서
+        만든 결과와 같아야 한다. 이벤트를 바꾸고 gen-bounds를 다시 돌리지 않으면 여기서 실패한다."""
+        committed = os.path.join(SERVER_DIR, "bounds.json")
+        shutil.copyfile(committed, self.out)          # 손으로 정한 값(kpmMax, 버전)을 그대로 이어받는다
+        r = run_node(GEN, "--out", self.out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(committed, encoding="utf-8") as f:
+            want = json.load(f)
+        with open(self.out, encoding="utf-8") as f:
+            got = json.load(f)
+        self.assertEqual(got, want, "server/bounds.json이 낡았다. node tools/gen-bounds.js를 실행하고 커밋하라")
+        self.assertIn("unchanged", r.stdout)
+        self.assertTrue(want["elites"] and want["bosses"], "S8 이후에는 엘리트와 보스 목록이 비어 있으면 안 된다")
+
     def test_manual_values_are_preserved(self):
         self.gen()
         with open(self.out, encoding="utf-8") as f:

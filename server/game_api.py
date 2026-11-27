@@ -17,6 +17,7 @@ import mimetypes
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
 import threading
@@ -32,6 +33,8 @@ DEFAULT_ORIGIN = "https://game.aovob7.duckdns.org"
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 MAX_BODY = 32 * 1024
+MAX_CONNS = 64                   # 동시에 처리하는 연결 수. 넘치면 바로 503을 돌려준다
+BODY_DEADLINE = 10               # 본문 전체를 받는 데 주는 시간(초)
 DRAIN_MAX = 64 * 1024            # 거부한 요청의 본문을 이만큼까지는 읽어 버린다(연결 재설정 방지)
 SOCKET_TIMEOUT = 15
 
@@ -331,6 +334,14 @@ class App:
         self.db.close()
 
 
+_UINT = re.compile(r"[0-9]+")
+
+
+def is_uint(s, max_len=9):
+    """ASCII 숫자만 있는 짧은 문자열인지. str.isdigit()는 위 첨자 같은 유니코드 숫자도 통과시켜 int()에서 ValueError가 난다."""
+    return isinstance(s, str) and len(s) <= max_len and _UINT.fullmatch(s) is not None
+
+
 def log_error(exc, path):
     """오류 종류와 경로만 남긴다. 토큰, 쿠키, sub, IP는 쓰지 않는다."""
     sys.stderr.write("error %s %s\n" % (type(exc).__name__, path))
@@ -396,9 +407,9 @@ ROUTES = {}
 FORM_POST_PATHS = set()   # Origin 검사 대신 다른 보호를 쓰는 경로(구글 콜백)
 
 
-def route(method, path, login="none", form_post=False):
+def route(method, path, login="none", form_post=False, allow_banned=False):
     def deco(fn):
-        ROUTES.setdefault(path, {})[method] = (fn, login)
+        ROUTES.setdefault(path, {})[method] = (fn, login, allow_banned)
         if form_post:
             FORM_POST_PATHS.add(path)
         return fn
@@ -467,7 +478,7 @@ class Handler(BaseHTTPRequestHandler):
     def drain(self):
         """읽지 않은 본문을 조금만 읽어 버린다. 안 그러면 응답 전에 연결이 재설정될 수 있다."""
         cl = self.headers.get("Content-Length", "")
-        if cl.isdigit() and 0 < int(cl) <= DRAIN_MAX and not getattr(self, "body_read", False):
+        if is_uint(cl) and 0 < int(cl) <= DRAIN_MAX and not getattr(self, "body_read", False):
             try:
                 self.rfile.read(int(cl))
             except OSError:
@@ -489,11 +500,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     resp = Resp(e.status, {"error": e.code}, e.headers)
             self.send_resp(resp)
-        except (OSError, ValueError) as e:
+        except OSError as e:
             # 연결 끊김, 시간 초과. 응답할 상대가 없다.
             if not isinstance(e, (ConnectionError, TimeoutError)):
                 log_error(e, path)
-        except Exception as e:
+        except Exception as e:      # ValueError를 포함한 나머지는 500으로 응답한다
             log_error(e, path)
             try:
                 self.send_resp(Resp(500, {"error": "server_error"}))
@@ -502,7 +513,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def process(self, app, method):
         path, _, qs = self.path.partition("?")
-        query = {k: v[0] for k, v in urllib.parse.parse_qs(qs, keep_blank_values=True, max_num_fields=20).items()}
+        try:
+            query = {k: v[0] for k, v in urllib.parse.parse_qs(qs, keep_blank_values=True, max_num_fields=20).items()}
+        except ValueError:          # 필드가 너무 많은 질의
+            raise ApiError(400, "bad_request")
         req = Req(app, method, path, query, self.headers, self.client_ip())
 
         if not path.startswith("/api/"):
@@ -524,9 +538,9 @@ class Handler(BaseHTTPRequestHandler):
         entry = methods.get(method)
         if entry is None:
             raise ApiError(405, "method_not_allowed", [("Allow", ", ".join(sorted(methods)))])
-        fn, login = entry
+        fn, login, allow_banned = entry
         if login != "none":
-            self.load_user(app, req, login == "required")
+            self.load_user(app, req, login == "required", allow_banned)
         resp = fn(app, req)
         resp.headers.extend(req.extra_headers)
         return resp
@@ -539,7 +553,7 @@ class Handler(BaseHTTPRequestHandler):
         cl = self.headers.get("Content-Length")
         if cl is None:
             raise ApiError(411, "length_required")
-        if not cl.isdigit() or len(cl) > 9:
+        if not is_uint(cl):
             raise ApiError(400, "bad_request")
         n = int(cl)
         if n > MAX_BODY:
@@ -547,20 +561,40 @@ class Handler(BaseHTTPRequestHandler):
         ctype = self.headers.get("Content-Type", "").split(";")[0].strip().lower()
         if not form_post and n > 0 and ctype != "application/json":
             raise ApiError(400, "bad_request")
-        data = self.rfile.read(n) if n else b""
+        data = self.read_exact(n) if n else b""
         self.body_read = True
         if len(data) != n:
             raise ApiError(400, "bad_request")
         req.body = data
         req.ctype = ctype
 
-    def load_user(self, app, req, required):
+    def read_exact(self, n):
+        """본문 n바이트를 BODY_DEADLINE초 안에 받는다. 한 번의 recv가 아니라 요청 전체에 마감을 건다."""
+        end = time.monotonic() + BODY_DEADLINE
+        parts, got = [], 0
+        try:
+            while got < n:
+                left = end - time.monotonic()
+                if left <= 0:
+                    raise TimeoutError("body deadline")
+                self.connection.settimeout(left)
+                chunk = self.rfile.read1(min(n - got, 8192))
+                if not chunk:
+                    break
+                parts.append(chunk)
+                got += len(chunk)
+        except TimeoutError:
+            self.body_read = True       # 느린 상대의 나머지를 더 읽지 않는다
+            raise ApiError(408, "request_timeout")
+        return b"".join(parts)
+
+    def load_user(self, app, req, required, allow_banned=False):
         user = find_session_user(app, req)
         if user is None:
             if required:
                 raise ApiError(401, "no_session")
             return
-        if required and user["banned"]:
+        if required and user["banned"] and not allow_banned:
             raise ApiError(403, "banned")
         req.user = user
 
@@ -589,7 +623,33 @@ class Server(ThreadingHTTPServer):
 
     def __init__(self, addr, app):
         self.app = app
+        self.slots = threading.BoundedSemaphore(MAX_CONNS)
         ThreadingHTTPServer.__init__(self, addr, Handler)
+
+    def process_request(self, request, client_address):
+        # 동시 연결이 상한이면 스레드를 만들지 않고 바로 503을 돌려준다
+        if not self.slots.acquire(blocking=False):
+            try:
+                request.settimeout(0.3)
+                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\nConnection: close\r\n"
+                                b"Content-Length: 0\r\n\r\n")
+                request.shutdown(socket.SHUT_WR)
+                request.recv(4096)          # 읽지 않은 요청이 남은 채 닫으면 상대가 응답 전에 재설정을 받는다
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            ThreadingHTTPServer.process_request(self, request, client_address)
+        except BaseException:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            ThreadingHTTPServer.process_request_thread(self, request, client_address)
+        finally:
+            self.slots.release()
 
 
 def make_server(app, host=None, port=None):
@@ -606,6 +666,7 @@ GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 SHA256_DIGESTINFO = bytes.fromhex("3031300d060960864801650304020105000420")
 MIN_KEY_BITS = 2048
 JWKS_RETRY_SEC = 300          # 키를 못 찾았을 때 다시 받는 최소 간격
+JWKS_RETRY_EMPTY_SEC = 30     # 키가 하나도 없을 때(시작 직후 실패 등)의 최소 간격
 JWKS_DEFAULT_MAX_AGE = 3600
 JWKS_MAX_AGE_RANGE = (60, 86400)
 EXP_LEEWAY = 60
@@ -658,7 +719,7 @@ def parse_max_age(cache_control):
     """Cache-Control 값에서 max-age(초)를 꺼낸다. 없으면 None."""
     for part in (cache_control or "").split(","):
         k, _, v = part.strip().partition("=")
-        if k.lower() == "max-age" and v.strip().isdigit():
+        if k.lower() == "max-age" and is_uint(v.strip(), 12):
             return int(v.strip())
     return None
 
@@ -708,7 +769,8 @@ class JwksCache:
         with self.lock:
             if kid in self.keys and now < self.expires:
                 return self.keys[kid]
-            if self.last_attempt is None or now - self.last_attempt >= JWKS_RETRY_SEC:
+            wait = JWKS_RETRY_SEC if self.keys else JWKS_RETRY_EMPTY_SEC
+            if self.last_attempt is None or now - self.last_attempt >= wait:
                 self.last_attempt = now
                 try:
                     doc, max_age = self.fetch()
@@ -932,7 +994,7 @@ def h_auth_callback(app, req):
                 location="/?login=ok")
 
 
-@route("POST", "/api/auth/logout", login="required")
+@route("POST", "/api/auth/logout", login="required", allow_banned=True)
 def h_auth_logout(app, req):
     with app.db.tx() as c:
         c.execute("DELETE FROM sessions WHERE token_hash=?", (req.user["session_hash"],))
@@ -965,7 +1027,7 @@ def h_me(app, req):
     })
 
 
-@route("DELETE", "/api/me", login="required")
+@route("DELETE", "/api/me", login="required", allow_banned=True)
 def h_me_delete(app, req):
     if req.json().get("confirm") != "DELETE":
         raise ApiError(400, "bad_request")
@@ -1399,7 +1461,7 @@ def h_leaderboard(app, req):
     if board not in ("time", "kills"):
         raise ApiError(400, "bad_request")
     ls = req.query.get("limit", str(BOARD_DEFAULT))
-    if not ls.isdigit() or len(ls) > 6 or int(ls) < 1:
+    if not is_uint(ls, 6) or int(ls) < 1:
         raise ApiError(400, "bad_request")
     limit = min(int(ls), BOARD_MAX)
     now = app.now()
@@ -1611,7 +1673,7 @@ def cmd_unban(args):
 
 
 def cmd_rename(args):
-    if len(args) != 2 or not args[0].isdigit():
+    if len(args) != 2 or not is_uint(args[0], 12):
         sys.exit("사용법: rename <userId> <닉네임>")
     with_admin_app(lambda app: rename_user(app, int(args[0]), args[1]))
     print("사용자 %s 닉네임을 %s로 바꿈" % (args[0], args[1]))

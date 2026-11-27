@@ -13,7 +13,7 @@ DESIGN-ACCOUNT.md에서 모호했던 부분을 구현하면서 정한 내용이�
 
 - 자동 영역은 `winMs`, `maxLevel`(200), `elites`([t초, 마릿수]), `bosses`, `lastBossT`, `xpToReach`(인덱스가 레벨, `xpToReach[L]`은 1에서 L까지 올리는 누적 경험치)다. 손으로 정하는 값은 `kpmMax`(분마다 1200 x 15개)와 `minRankedVersion`(처음엔 `LW.VERSION`)이다.
 - `type`이 `elite`인 이벤트는 `n`(없으면 1)마리, `boss`는 1마리로 센다. 한 시각에 엘리트가 둘이면 이벤트 둘로 적어도 된다.
-- `js/data/waves.js`의 `LW.EVENTS`는 지금 비어 있다(S8 전). 그래서 커밋된 `server/bounds.json`의 `elites`, `bosses`도 비어 있다. S8이 끝난 뒤 `node tools/gen-bounds.js`를 다시 돌리고 커밋해야 한다. 그 전에 클라이언트가 엘리트 처치를 올리면 `events` 검사에서 rejected가 된다.
+- S8 뒤에 `node tools/gen-bounds.js`를 다시 돌려 `server/bounds.json`의 `elites`(10건), `bosses`(300, 600, 840)를 채워 커밋했다(리뷰 2 B1). 이벤트를 바꾸고 다시 돌리지 않으면 `tests/test_bounds.py`의 `test_committed_bounds_json_matches_current_game_data`가 실패한다(커밋된 파일을 임시 복사본에 이어받아 생성 결과와 전체를 비교).
 - 서버 시험은 DESIGN.md 5.4 표를 옮긴 `tests/fixtures/waves-design.js`에서 만든 `bounds-design.json`을 쓴다. 실제 게임 데이터가 바뀌어도 서버 시험이 흔들리지 않는다.
 - `gen-bounds.js`는 `js/config.js`, `js/util.js`, waves 파일을 `vm`에서 순서대로 실행한다. 이 파일들이 브라우저 전용 API(`document` 등)를 최상위에서 부르면 sandbox에 같은 스텁을 더해야 한다.
 
@@ -44,10 +44,18 @@ DESIGN-ACCOUNT.md에서 모호했던 부분을 구현하면서 정한 내용이�
 - 쓰기 요청의 검사 순서는 요청 제한 -> `Origin` -> 411 -> 413 -> `Content-Type` -> 라우트다. 없는 경로도 먼저 403, 411, 413을 받는다. 본문 없는 쓰기 요청도 `Content-Length: 0`이 있어야 한다.
 - 연결은 요청마다 닫는다(HTTP/1.0). 거부한 요청의 본문은 64KB까지 읽어 버려서, 클라이언트가 응답 전에 연결 재설정을 받지 않게 한다. 소켓 시간 제한은 15초다.
 - 로그인 콜백의 요청 제한 초과는 JSON 429가 아니라 `303 /?login=fail&r=rate`로 돌려준다(브라우저 이동이라서).
-- 차단된 사용자도 로그인(세션 발급)은 된다. 이후 모든 로그인 필요 API가 403 `banned`를 돌려준다.
+- 차단된 사용자도 로그인(세션 발급)은 된다. 이후 로그인 필요 API는 403 `banned`를 돌려준다. 예외는 로그아웃(`POST /api/auth/logout`)과 계정 삭제(`DELETE /api/me`)다. 자기 세션과 데이터를 지울 수 있어야 하므로 라우트의 `allow_banned` 옵션을 켰다(리뷰 2 B3).
 - `X-Real-IP`가 없으면 소켓 상대 주소를 쓴다(로컬 시험용).
 - JWKS를 못 받으면 남아 있는 옛 키로 계속 검증한다. 다시 받기는 5분에 한 번이다. `max-age`는 60초에서 24시간 사이로 맞추고, 헤더가 없으면 1시간이다.
 
 ## 작업 이력
 
 - S16 파일(`server/game_api.py` 뼈대, `server/tests/support.py`, `test_server_basics.py`)은 같은 작업 트리의 다른 coder가 만든 커밋 `1e9e2f7`(S5)에 함께 들어갔다. 이미 푸시된 이력이라 고치지 않았다.
+
+## 리뷰 2 반영 (B2, B4, B5)
+
+- 숫자 검사는 `is_uint`(ASCII 숫자만, 길이 제한)로 한다. `str.isdigit()`는 위 첨자 같은 유니코드 숫자도 통과시켜 `int()`에서 ValueError가 났다. 질의 필드가 20개를 넘으면 400이다. 연결 끊김과 시간 초과(OSError)만 조용히 넘기고, 그 밖의 ValueError는 500 응답과 로그를 남긴다.
+- 동시 연결은 64개(`MAX_CONNS`)까지다. 넘으면 스레드를 만들지 않고 바로 503을 돌려준다. 요청 본문은 전체 마감 10초(`BODY_DEADLINE`) 안에 받아야 하고, 넘으면 408(`request_timeout`)이다. 마감 뒤에는 본문을 더 읽지 않는다.
+- Caddy 쪽 권장(OwL-server 레포의 Caddyfile에서 적용, 이 저장소에서는 못 고침): game 사이트에 `request_body { max_size 64KB }`와 `reverse_proxy` 안에 `transport http { read_timeout 20s }`를 둔다. 적용 여부는 확인 필요.
+- JWKS 캐시에 키가 하나도 없으면 다시 받는 간격이 30초(`JWKS_RETRY_EMPTY_SEC`)다. 키가 있을 때는 그대로 5분이다.
+- B6(승리 판의 `timeMs`는 정확히 900000이어야 한다): 서버는 바꾸지 않는다. 클라이언트(S22)가 승리 판의 `timeMs`를 `LW.WIN_TIME * 1000`으로 고정해 보내야 한다.
