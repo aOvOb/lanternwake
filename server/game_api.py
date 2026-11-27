@@ -588,6 +588,8 @@ class Handler(BaseHTTPRequestHandler):
         except TimeoutError:
             self.body_read = True       # 느린 상대의 나머지를 더 읽지 않는다
             raise ApiError(408, "request_timeout")
+        finally:
+            self.connection.settimeout(SOCKET_TIMEOUT)    # 남은 마감 시간이 응답 쓰기의 제한으로 남지 않게 한다
         return b"".join(parts)
 
     def load_user(self, app, req, required, allow_banned=False):

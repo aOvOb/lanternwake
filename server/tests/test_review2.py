@@ -127,6 +127,24 @@ class ConnectionLimitTest(unittest.TestCase):
                 s.close()
             srv.close()
 
+    def test_read_exact_restores_socket_timeout(self):
+        # R9: 본문을 받은 뒤 소켓 제한 시간이 남은 마감 시간이 아니라 SOCKET_TIMEOUT 으로 돌아온다
+        a, b = socket.socketpair()
+        try:
+            h = game_api.Handler.__new__(game_api.Handler)
+            h.connection = a
+            h.rfile = a.makefile("rb")
+            b.sendall(b"x" * 10)
+            self.assertEqual(h.read_exact(10), b"x" * 10)
+            self.assertEqual(a.gettimeout(), game_api.SOCKET_TIMEOUT)
+            game_api.BODY_DEADLINE = 0.2                         # 시간 초과로 끝나는 경우도 같다
+            with self.assertRaises(game_api.ApiError):
+                h.read_exact(10)
+            self.assertEqual(a.gettimeout(), game_api.SOCKET_TIMEOUT)
+        finally:
+            a.close()
+            b.close()
+
     def test_slow_body_hits_overall_deadline(self):
         game_api.BODY_DEADLINE = 0.6
         srv = TestServer()
