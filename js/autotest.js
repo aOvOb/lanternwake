@@ -219,7 +219,7 @@
   }
 
   // 레벨업 카드 점수. 높은 쪽을 고르고, 0 이하는 거절한다(무강화 봇만 거절이 나온다).
-  // 보유 무기 레벨업 > 진화 짝 패시브(새로 얻기) > 새 무기(슬롯 채우기) > 진화 짝 패시브 레벨업 > 그 밖의 새 패시브 > 그 밖의 패시브 레벨업
+  // 보유 무기 레벨업 > 진화 짝 패시브(새로 얻기) > 새 무기(슬롯 채우기) > 진화 짝 패시브 레벨업 > 빛샘 심장 > 그 밖의 새 패시브 > 그 밖의 패시브 레벨업
   function botCardScore(c) {
     var g = LW.game, i, w = null, p = null;
     if (c.type === 'heal') return 1;
@@ -239,6 +239,7 @@
       if (ev && ev.passive === c.id && !g.weapons[i].evolved) isPartner = true;
     }
     if (isPartner) return p ? 40 : 90;
+    if (c.id === 'P7') return p ? 25 : 45;   // 빛샘 심장(최대 HP와 재생): 회복 수단이 이것뿐이라 사람이 흔히 먼저 고른다
     return p ? 20 : 30;
   }
   function botLevelup(g) {
