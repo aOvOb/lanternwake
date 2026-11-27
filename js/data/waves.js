@@ -2,12 +2,12 @@
 (function () {
   function W(from, to, weights, rate, minAlive) { return { from: from * 60, to: to * 60, weights: weights, rate: rate, minAlive: minAlive }; }
   LW.WAVES = [
-    W(0, 1, { mite: 100 }, 1.5, 10),
-    W(1, 2, { mite: 70, moth: 30 }, 2.5, 20),
-    W(2, 3, { mite: 40, moth: 30, mudling: 30 }, 3, 30),
-    W(3, 4, { moth: 30, mudling: 40, spore: 30 }, 3.5, 45),
-    W(4, 5, { mite: 20, mudling: 30, spore: 20, rusthelm: 30 }, 4.5, 60),
-    W(5, 6, { moth: 40, spore: 20, rusthelm: 40 }, 3.5, 50),
+    W(0, 1, { mite: 100 }, 0.8, 6),
+    W(1, 2, { mite: 70, moth: 30 }, 1, 8),
+    W(2, 3, { mite: 40, moth: 30, mudling: 30 }, 1.1, 10),
+    W(3, 4, { moth: 30, mudling: 40, spore: 30 }, 1.2, 12),
+    W(4, 5, { mite: 20, mudling: 30, spore: 20, rusthelm: 30 }, 1.4, 15),
+    W(5, 6, { moth: 40, spore: 20, rusthelm: 40 }, 1.3, 14),
     W(6, 7, { moth: 30, rusthelm: 30, eye: 20, boar: 20 }, 5, 75),
     W(7, 8, { mudling: 25, spore: 20, eye: 25, boar: 30 }, 6, 95),
     W(8, 9, { mite: 20, rusthelm: 30, eye: 30, boar: 20 }, 7, 115),
