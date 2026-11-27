@@ -28,6 +28,7 @@
     LW.platform.wakeLock(s === 'PLAYING' || s === 'LEVELUP' || s === 'CHEST');
     if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE' || s === 'SETTINGS') LW.input.onOverlayOpen();
     LW.ui.onState(s);
+    if (s === 'PLAYING') LW.audio.resume();       // 일시정지를 풀면 오디오도 다시 연다
   };
 
   // 새 판 시작: 모든 풀과 상태를 처음으로 돌린다

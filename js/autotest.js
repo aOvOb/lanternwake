@@ -80,8 +80,21 @@
     roundT = 0;
   }
 
+  // 효과음 호출 경로 검사: 모든 효과음을 한 번씩 불러 예외가 없는지 본다(맨 처음 판에서만)
+  var audioChecked = false;
+  function audioCheck() {
+    if (audioChecked) return;
+    audioChecked = true;
+    var names = ['hit', 'gem', 'levelup', 'hurt', 'chest', 'bossWarn', 'win', 'lose', 'start', 'pickup', 'candle'];
+    for (var i = 0; i < names.length; i++) {
+      try { LW.audio[names[i]](); } catch (e) { push('audio.' + names[i] + ': ' + str(e)); }
+    }
+    try { LW.audio.vibrate(10); LW.audio.suspend(); LW.audio.resume(); LW.audio.applySettings(); } catch (e2) { push('audio: ' + str(e2)); }
+  }
+
   // 새 판이 시작된 직후 한 번 호출: 시간 건너뛰기와 시작 빌드
   at.setup = function (g) {
+    audioCheck();
     if (START > 0) {
       g.time = START;
       if (LW.spawner.skipTo) LW.spawner.skipTo(START);
@@ -265,6 +278,7 @@
       maxNormal: p.maxNormal || 0,
       chestsOpened: g.chestsOpened || 0,
       mapItems: g.mapStats || {},
+      audioPlayed: LW.audio.played || 0,
       rounds: ROUNDS,
       roundsDone: roundsDone,
       roundStarts: at.roundStarts,
