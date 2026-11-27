@@ -1,7 +1,9 @@
 // Service worker: 버전 이름이 붙은 캐시를 cache-first로 쓴다.
-// VERSION과 ASSETS는 tools/release.js가 고친다. 손으로 고치지 않는다.
+// VERSION, BUILD, ASSETS는 tools/release.js가 고친다. 손으로 고치지 않는다.
+// BUILD는 배포 파일 내용의 해시다. 버전이 같아도 파일이 바뀌면 sw.js 바이트와 캐시 이름이 달라져 클라이언트가 갱신한다.
 const VERSION = '1.0.0';
-const CACHE = 'lanternwake-' + VERSION;
+const BUILD = 'be11575f1e9c6f2d0868a67b6c7045e4400bdce9219a20aa242265586897a2e8';
+const CACHE = 'lanternwake-' + VERSION + '-' + BUILD.slice(0, 12);
 const ASSETS = [ /* @assets-start */
   './',
   './index.html',

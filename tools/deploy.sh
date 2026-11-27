@@ -16,7 +16,7 @@
 # 환경 변수
 #   OWL_SERVER_DIR       OwL-server 레포 위치(기본: 이 저장소 옆 ../Owl-player/OwL-server)
 #   NO_STACK=1           game 서비스 블록과 Caddy 블록을 넣지 않는다(서버의 compose와 Caddyfile에 game이 이미 있을 때). owl-backup은 있으면 넣는다
-#   SKIP_RELEASE_CHECK=1 sw.js 버전과 목록 검사를 건너뛴다(시험용)
+#   SKIP_RELEASE_CHECK=1 sw.js 버전, 목록, 내용 해시(BUILD) 검사를 건너뛴다(시험용)
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -44,6 +44,15 @@ if [ "${SKIP_RELEASE_CHECK:-0}" != 1 ]; then
   while IFS= read -r p; do
     [ -f "$p" ] || die "sw.js 목록에 있는 $p 파일이 없습니다. node tools/release.js $VER 를 다시 실행하세요."
   done <<< "$listed"
+  # 배포 파일 내용 해시(BUILD)가 sw.js 와 같은지 다시 계산한다. 계산식은 tools/release.js 와 같다(경로 정렬, CR 제거).
+  # release.js 를 돌린 뒤에 파일을 또 고쳤다면 여기서 멈춘다(클라이언트가 옛 파일을 계속 쓰게 되는 것을 막는다).
+  want=$(grep -o "^const BUILD = '[0-9a-f]*';" sw.js | head -n 1 | tr -d '\r' | sed "s/^const BUILD = '\(.*\)';/\1/")
+  [ -n "$want" ] || die "sw.js에서 BUILD 해시를 읽지 못했습니다. node tools/release.js $VER 를 실행하세요."
+  have=$(while IFS= read -r p; do
+    printf '%s  %s\n' "$(tr -d '\r' < "$p" | sha256sum | cut -d' ' -f1)" "$p"
+  done <<< "$listed" | sha256sum | cut -d' ' -f1)
+  [ "$have" = "$want" ] \
+    || die "배포 파일 내용이 sw.js의 BUILD와 다릅니다(파일을 고친 뒤 release.js를 안 돌렸습니다). node tools/release.js $VER 를 다시 실행하세요."
   actual=$( { echo index.html; echo manifest.webmanifest; find js -type f -name '*.js'; find icons -type f -name '*.png'; } | LC_ALL=C sort)
   missing=$(comm -13 <(echo "$listed") <(echo "$actual"))
   [ -z "$missing" ] || die "다음 파일이 sw.js 목록에 없습니다(오프라인에서 안 열림). node tools/release.js $VER 를 다시 실행하세요:
