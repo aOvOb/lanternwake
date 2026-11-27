@@ -597,6 +597,12 @@
 
   // 장판, 폭발, 예고, 번개 연출
   var BLAST_FILL = ['255,154,60', '182,224,74', '230,60,60'];
+  // 테마별 채우기와 테두리 색 문자열은 미리 만들어 둔다(프레임마다 새로 만들지 않는다)
+  var BLAST_FILLS = [], BLAST_STROKES = [];
+  for (var bf = 0; bf < BLAST_FILL.length; bf++) {
+    BLAST_FILLS.push('rgba(' + BLAST_FILL[bf] + ',0.55)');
+    BLAST_STROKES.push('rgba(' + BLAST_FILL[bf] + ',1)');
+  }
   function drawAreas(ctx, l, r, t, b) {
     var items = LW.areas.items, n = LW.areas.n, K = LW.AREA, i;
     for (i = 0; i < n; i++) {
@@ -622,8 +628,8 @@
         case K.BLAST:
           ctx.globalAlpha = (1 - p) * 0.7;
           circle(ctx, a.x, a.y, a.r * (0.4 + 0.6 * p));
-          ctx.fillStyle = 'rgba(' + BLAST_FILL[a.flag] + ',0.55)'; ctx.fill();
-          ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(' + BLAST_FILL[a.flag] + ',1)'; ctx.stroke();
+          ctx.fillStyle = BLAST_FILLS[a.flag]; ctx.fill();
+          ctx.lineWidth = 2; ctx.strokeStyle = BLAST_STROKES[a.flag]; ctx.stroke();
           ctx.globalAlpha = 1;
           break;
         case K.SWING:

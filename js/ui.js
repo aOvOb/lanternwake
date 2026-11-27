@@ -440,7 +440,7 @@
     var P = LW.perf, v = LW.view, s = LW.safe;
     var lines = [
       'FPS ' + P.fps.toFixed(0) + '  update ' + P.updLast.toFixed(2) + 'ms  render ' + P.rndLast.toFixed(2) + 'ms',
-      '적 ' + LW.enemies.n + '  탄 ' + LW.projectiles.n + '  보석 ' + LW.gems.n + '  파티클 ' + LW.particles.n + '  숫자 ' + LW.dmgNums.n,
+      '적 ' + LW.enemies.n + '  탄 ' + LW.projectiles.n + '  보석 ' + LW.gems.n + '  장판 ' + LW.areas.n + '/' + P.maxAreas + '  파티클 ' + LW.particles.n + '  숫자 ' + LW.dmgNums.n,
       '화질 ' + LW.quality.name + '  DPR ' + v.dprUsed.toFixed(2) + '/' + v.dpr.toFixed(2) + '  시야 ' + v.w.toFixed(0) + 'x' + v.h.toFixed(0)
     ];
     var g = LW.game, i;

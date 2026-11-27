@@ -285,6 +285,7 @@
       eventsFired: LW.spawner && LW.spawner.fired ? LW.spawner.fired : {},
       spawned: LW.spawner && LW.spawner.spawned ? LW.spawner.spawned : {},
       maxNormal: p.maxNormal || 0,
+      maxAreas: p.maxAreas || 0,
       chestsOpened: g.chestsOpened || 0,
       mapItems: g.mapStats || {},
       bossActive: !!(LW.enemies.boss && LW.enemies.boss.active),

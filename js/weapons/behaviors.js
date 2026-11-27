@@ -228,13 +228,15 @@
         var dx = e.x - P.x, dy = e.y - P.y;
         if (dx < hw && dx > -hw && dy < hh && dy > -hh) cand[c++] = i;
       }
-      var strikes = Math.min(c, L.n + S.amount);
+      // 앞선 낙뢰가 후보를 죽였다면 그 후보는 건너뛰고 남은 후보에서 계속 뽑는다(낙뢰 수 유지)
+      var strikes = Math.min(c, L.n + S.amount), done = 0;
       var r = L.r * S.area, dmg = L.dmg * S.might, kb = w.def.base.kb;
-      for (i = 0; i < strikes; i++) {
+      for (i = 0; i < c && done < strikes; i++) {
         var j = i + ((LW.rand() * (c - i)) | 0);
         var t = cand[i]; cand[i] = cand[j]; cand[j] = t;
         var tg = items[cand[i]];
         if (!tg.active) continue;
+        done++;
         var x = tg.x, y = tg.y;
         LW.damageCircle(x, y, r, dmg, w.slot, kb);
         LW.areas.add(LW.AREA.BOLT, w.slot, x, y, r, 0, 0.25);

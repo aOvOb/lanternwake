@@ -12,8 +12,11 @@
   var pool = LW.areas = LW.makePool(LW.POOL.areas, make);
 
   // 새 장판. 나머지 필드는 호출한 쪽에서 채운다.
+  // 연출용(폭발, 낙뢰, 연쇄, 낫)은 풀 끝 FX_RESERVE칸을 쓰지 않는다. 판정용(독, 항아리, 씨앗, 예고)이 자리를 못 얻는 일을 막는다.
+  var FX_RESERVE = 24;
   pool.add = function (kind, slot, x, y, r, dmg, life) {
-    var a = pool.spawn();
+    var fx = kind === K.BLAST || kind === K.BOLT || kind === K.CHAIN || kind === K.SWING;
+    var a = pool.spawn(fx ? pool.size - FX_RESERVE : undefined);
     if (!a) return null;
     a.kind = kind; a.slot = slot; a.x = x; a.y = y; a.r = r; a.dmg = dmg;
     a.life = a.maxLife = life;

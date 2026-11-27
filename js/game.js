@@ -14,7 +14,7 @@
     newBest: { time: false, kills: false, level: false }
   };
   var perf = LW.perf = {
-    updSum: 0, updN: 0, rndSum: 0, rndN: 0, updLast: 0, rndLast: 0, fps: 60, maxEnemies: 0, maxNormal: 0
+    updSum: 0, updN: 0, rndSum: 0, rndN: 0, updLast: 0, rndLast: 0, fps: 60, maxEnemies: 0, maxNormal: 0, maxAreas: 0
   };
 
   var last = 0, acc = 0;
@@ -52,7 +52,7 @@
     LW.platform.resize();
     LW.spawner.reset();
     g.weapons = [LW.makeWeapon('ember', 0)];
-    perf.maxEnemies = 0; perf.maxNormal = 0;
+    perf.maxEnemies = 0; perf.maxNormal = 0; perf.maxAreas = 0;
     last = performance.now(); acc = 0;
   };
 
@@ -140,6 +140,7 @@
     LW.pickups.update(dt);                 // 9
     LW.effects.update(dt);                 // 10
     if (LW.enemies.n > perf.maxEnemies) perf.maxEnemies = LW.enemies.n;
+    if (LW.areas.n > perf.maxAreas) perf.maxAreas = LW.areas.n;
     if (P.hp <= 0) { g.end(false); return; }
     if (g.pending > 0) LW.levelup.open();  // 11
     else if (g.chestB > 0) { g.chestB--; LW.chest.open(true); }

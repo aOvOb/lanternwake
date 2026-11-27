@@ -4,7 +4,7 @@
     return {
       active: false, kind: 0, slot: 0, x: 0, y: 0, vx: 0, vy: 0, dx: 0, dy: 0, r: 5,
       dmg: 0, pierce: 1, life: 0, hitIds: new Int32Array(16), hitN: 0, extra: 0,
-      hitGap: 0, turn: 0, speed: 0, maxLife: 0
+      hitGap: 0, turn: 0, speed: 0, maxLife: 0, hitT: new Float32Array(16)
     };
   }
   var pool = LW.projectiles = LW.makePool(LW.POOL.projectiles, make);
@@ -69,8 +69,20 @@
         var dx = e.x - p.x, dy = e.y - p.y, rr = p.r + e.r;
         if (dx * dx + dy * dy > rr * rr) continue;
         if (p.kind === 1) {
-          if (e.hitCd[p.slot] > time) continue;
-          e.hitCd[p.slot] = time + p.hitGap;
+          // 원반마다 자기 재타격 쿨다운을 가진다(hitIds와 hitT가 짝). 같은 무기의 다른 원반은 막지 않는다.
+          var hi = -1, free = -1, oldest = 0, hh;
+          for (hh = 0; hh < p.hitN; hh++) {
+            if (p.hitIds[hh] === e.uid) { hi = hh; break; }
+            if (free < 0 && p.hitT[hh] <= time) free = hh;
+            if (p.hitT[hh] < p.hitT[oldest]) oldest = hh;
+          }
+          if (hi >= 0) {
+            if (p.hitT[hi] > time) continue;
+          } else if (free >= 0) hi = free;
+          else if (p.hitN < 16) hi = p.hitN++;
+          else hi = oldest;               // 16칸이 모두 쿨다운 중이면 가장 먼저 풀릴 칸을 덮어쓴다
+          p.hitIds[hi] = e.uid;
+          p.hitT[hi] = time + p.hitGap;
           LW.dealDamage(e, p.dmg, p.slot, p.dx, p.dy, p.extra);
           continue;
         }
