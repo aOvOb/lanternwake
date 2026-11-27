@@ -45,7 +45,10 @@ window.LW = window.LW || {};
     sink: q.get('sink') === '1',
     flow: q.get('flow') || '',
     // guestrec=1은 자동 검사 시작 전에 게스트 기록(최고 시간 120초 등)과 소리 꺼짐 설정을 저장소에 심는다(가져오기와 설정 동기화 검사용)
-    guestRec: q.get('guestrec') === '1'
+    guestRec: q.get('guestrec') === '1',
+    // 밸런스 점검: bot=1 휴리스틱 봇, bot=naive 불씨 화살만 유지하는 무강화 봇, seed=N 난수 시드(자동 검사에서만, 기본 12345)
+    bot: q.get('bot') === '1' ? '1' : (q.get('bot') === 'naive' ? 'naive' : ''),
+    seed: Math.floor(Number(q.get('seed'))) || 12345
   };
 
   // 계정 API(같은 출처). 게스트로 바로 플레이하고 서버가 없으면 계정 기능만 "오프라인"이 된다.

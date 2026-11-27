@@ -13,7 +13,7 @@
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   };
-  var rng = LW.mulberry32(LW.params.autotest ? 12345 : ((Date.now() ^ (Math.random() * 1e9)) >>> 0));
+  var rng = LW.mulberry32(LW.params.autotest ? LW.params.seed : ((Date.now() ^ (Math.random() * 1e9)) >>> 0));
   LW.rand = function () { return rng(); };
   LW.randRange = function (a, b) { return a + (b - a) * rng(); };
   // 그리기 전용 난수. 파티클과 데미지 숫자처럼 게임 결과에 영향이 없는 곳만 쓴다.

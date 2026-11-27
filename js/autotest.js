@@ -5,7 +5,10 @@
 //           &rounds=N(연속 N판, 사망하면 다시 하기), &dieat=초(각 판을 그 시각에 사망시킴),
 //           &snapstate=TITLE|RESULT|PAUSED|SETTINGS(그 화면이 그려진 뒤 스냅샷),
 //           &crowd=1(적 풀을 가득 채움), &killlast=1(마지막 그림자 HP를 1로),
-//           &god=1(무적), &elite=1(15초마다 엘리트), &candle=1(6초마다 가까운 촛대), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
+//           &god=1(무적), &elite=1(15초마다 엘리트), &candle=1(6초마다 가까운 촛대), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록),
+//           &bot=1(밸런스 점검용 휴리스틱 봇: 덜 붐비는 쪽과 보석 쪽으로 이동, 적 탄과 예고를 피하고, 레벨업 카드를 규칙으로 고름),
+//           &bot=naive(불씨 화살만 유지하는 무강화 봇: 새 무기와 패시브 카드를 거절), &seed=N(난수 시드, 기본 12345).
+//           봇은 input.auto(이동 벡터)로만 움직이고 게임 규칙과 수치는 건드리지 않는다. 결과 JSON의 bot 항목에 사망 시각, 레벨, 처치 수, 진화 수, 분당 받은 피해가 들어간다.
 (function () {
   var N = LW.params.autotest;
   var BENCH = LW.params.bench;
@@ -50,8 +53,205 @@
     return origErr.apply(console, arguments);
   };
 
-  // 게임 시간 1스텝마다 호출: 플레이어가 원을 그리며 움직인다
+  // ===== 봇(&bot=1, &bot=naive) =====
+  var BOT = LW.params.bot, NAIVE = BOT === 'naive';
+  var botDmg = new Float64Array(15);      // 1분 단위로 받은 피해 합(방어력 적용 뒤 실제로 깎인 HP)
+  var botEvoAt = [];                      // 진화가 일어난 게임 시각
+  var botHooked = false, botT = 0, botPrev = 0;
+  var GN = 14, GC = 48, GH = GN * GC / 2;  // 밀도 그리드: 칸 48, 14x14, 플레이어 중심 +-336
+  var dens = new Float32Array(GN * GN), blur = new Float32Array(GN * GN);
+  var NDIR = 16, COS = [], SIN = [], score = new Float64Array(NDIR);
+  var RAY_D = [30, 70, 110, 150], RAY_W = [1, 0.9, 0.7, 0.5];
+  var nearBuf = [], nearN = 0;
+  for (var bk = 0; bk < NDIR; bk++) { COS.push(Math.cos(bk * Math.PI * 2 / NDIR)); SIN.push(Math.sin(bk * Math.PI * 2 / NDIR)); }
+
+  // 받은 피해를 기록한다. 원래 hurt를 그대로 부르고 HP가 깎인 양만 잰다(규칙은 바뀌지 않는다).
+  function botHook() {
+    if (botHooked) return;
+    botHooked = true;
+    var P = LW.player, orig = P.hurt;
+    P.hurt = function (dmg) {
+      var before = P.hp;
+      orig.call(P, dmg);
+      var m = Math.min(14, (LW.game.time / 60) | 0);
+      botDmg[m] += before - P.hp;
+    };
+  }
+
+  // 30Hz로 이동 방향을 새로 고른다. 16방향마다 점수를 매겨 가장 높은 방향의 단위 벡터를 input.auto로 넘긴다.
+  function botMove(dt) {
+    botT -= dt;
+    if (botT > 0) return;
+    botT = 1 / 30;
+    var P = LW.player, sp = P.speed * P.moveMul;
+    var items, n, i, k, j, dx, dy, d, dot, e;
+    for (k = 0; k < NDIR; k++) score[k] = 0;
+
+    // 1) 주변 적 밀도 그리드(접촉 피해가 클수록, 엘리트와 보스일수록 가중치가 큼)를 3x3으로 흐려 방향별 광선 위를 읽는다
+    dens.fill(0);
+    items = LW.enemies.items; n = LW.enemies.n; nearN = 0;
+    for (i = 0; i < n; i++) {
+      e = items[i];
+      if (!e.active) continue;
+      dx = e.x - P.x; dy = e.y - P.y;
+      if (dx <= -GH || dx >= GH || dy <= -GH || dy >= GH) continue;
+      var w = 1 + e.dmg * 0.08;
+      if (e.elite) w *= 2;
+      if (e.boss) w *= 3;
+      dens[(((dy + GH) / GC) | 0) * GN + (((dx + GH) / GC) | 0)] += w;
+      if (dx * dx + dy * dy < 100 * 100) nearBuf[nearN++] = e;
+    }
+    for (var gy = 0; gy < GN; gy++) {
+      for (var gx = 0; gx < GN; gx++) {
+        var sum = 0;
+        for (var oy = -1; oy <= 1; oy++) {
+          for (var ox = -1; ox <= 1; ox++) {
+            var cx = gx + ox, cy = gy + oy;
+            if (cx >= 0 && cy >= 0 && cx < GN && cy < GN) sum += dens[cy * GN + cx];
+          }
+        }
+        blur[gy * GN + gx] = sum;
+      }
+    }
+    for (k = 0; k < NDIR; k++) {
+      for (j = 0; j < RAY_D.length; j++) {
+        var qx = (COS[k] * RAY_D[j] + GH) / GC, qy = (SIN[k] * RAY_D[j] + GH) / GC;
+        score[k] -= RAY_W[j] * 0.45 * blur[(qy | 0) * GN + (qx | 0)];
+      }
+    }
+    // 바로 옆의 적 쪽으로는 가지 않는다
+    for (i = 0; i < nearN; i++) {
+      e = nearBuf[i];
+      dx = e.x - P.x; dy = e.y - P.y; d = Math.sqrt(dx * dx + dy * dy) || 1;
+      if (d > e.r + P.r + 40) continue;
+      for (k = 0; k < NDIR; k++) {
+        dot = (dx * COS[k] + dy * SIN[k]) / d;
+        if (dot > 0) score[k] -= 5 * dot * (1 + e.dmg * 0.05);
+      }
+    }
+
+    // 2) 보석 쪽으로
+    items = LW.gems.items; n = LW.gems.n;
+    for (i = 0; i < n; i++) {
+      var gm = items[i];
+      if (!gm.active) continue;
+      dx = gm.x - P.x; dy = gm.y - P.y; d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 320 || d < 1) continue;
+      var f = (1 + Math.min(gm.value, 20) * 0.1) * 1.6 / (1 + d / 120) / d;
+      for (k = 0; k < NDIR; k++) {
+        dot = dx * COS[k] + dy * SIN[k];
+        if (dot > 0) score[k] += dot * f;
+      }
+    }
+    // 상자는 진화에 필요하므로 크게, 기름은 HP가 모자랄 때, 끌개 종과 정화의 빛은 조금
+    items = LW.pickups.items; n = LW.pickups.n;
+    var K = LW.PK, low = P.hp < P.maxHp * 0.7;
+    for (i = 0; i < n; i++) {
+      var pk = items[i];
+      if (!pk.active) continue;
+      var kw = pk.kind === K.CHEST || pk.kind === K.BOSS_CHEST ? 4 : (pk.kind === K.OIL ? (low ? 3 : 0.5) : (pk.kind === K.BELL ? 1.5 : (pk.kind === K.LIGHT ? 2 : 0)));
+      if (!kw) continue;
+      dx = pk.x - P.x; dy = pk.y - P.y; d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 700 || d < 1) continue;
+      for (k = 0; k < NDIR; k++) {
+        dot = (dx * COS[k] + dy * SIN[k]) / d;
+        if (dot > 0) score[k] += kw * dot;
+      }
+    }
+
+    // 3) 적 탄: 방향 k로 가면 탄과 닿는지 0.15~0.8초 앞까지 본다
+    items = LW.ebullets.items; n = LW.ebullets.n;
+    for (i = 0; i < n; i++) {
+      var b = items[i];
+      dx = b.x - P.x; dy = b.y - P.y;
+      if (dx * dx + dy * dy > 300 * 300) continue;
+      var br = b.r + P.r + 8;
+      for (k = 0; k < NDIR; k++) {
+        for (var t = 0.15; t <= 0.81; t += 0.15) {
+          var ex = b.x + b.vx * t - (P.x + COS[k] * sp * t), ey = b.y + b.vy * t - (P.y + SIN[k] * sp * t);
+          if (ex * ex + ey * ey < br * br) { score[k] -= 9 * (1.2 - t); break; }
+        }
+      }
+    }
+
+    // 4) 예고 원: 터지는 시각의 위치가 원 안이면 크게 감점
+    items = LW.areas.items; n = LW.areas.n;
+    for (i = 0; i < n; i++) {
+      var a = items[i];
+      if (a.kind !== LW.AREA.TELE || a.life <= 0) continue;
+      var life = a.life + 0.05, rr = a.r + P.r * 0.5 + 4;
+      for (k = 0; k < NDIR; k++) {
+        var tx = P.x + COS[k] * sp * life - a.x, ty = P.y + SIN[k] * sp * life - a.y;
+        if (tx * tx + ty * ty < rr * rr) score[k] -= 14;
+      }
+    }
+
+    // 5) 예고선과 돌진: 멧돼지(340/s, 0.6초)와 마지막 그림자(400/s, 0.5초)의 돌진 경로와 겹치는 방향은 감점
+    items = LW.enemies.items; n = LW.enemies.n;
+    for (i = 0; i < n; i++) {
+      e = items[i];
+      if (!e.active || e.aiState === 0 || (e.def.ai !== 'charge' && e.def.ai !== 'last')) continue;
+      var dsp = e.def.ai === 'charge' ? 340 : 400, dT = e.def.ai === 'charge' ? 0.6 : 0.5;
+      var warn = e.aiState === 1 ? e.aiT : 0, dashLeft = e.aiState === 1 ? dT : e.aiT;
+      var hr = e.r + P.r + 8;
+      for (k = 0; k < NDIR; k++) {
+        for (var t2 = 0.05; t2 <= 1.3; t2 += 0.1) {
+          var run = t2 - warn;
+          if (run < 0) run = 0; else if (run > dashLeft) run = dashLeft;
+          var hx = e.x + e.ax * dsp * run - (P.x + COS[k] * sp * t2), hy = e.y + e.ay * dsp * run - (P.y + SIN[k] * sp * t2);
+          if (hx * hx + hy * hy < hr * hr) { score[k] -= 12 * (1.5 - t2 * 0.5); break; }
+        }
+      }
+    }
+
+    // 6) 흔들림을 줄이려고 직전 방향을 조금 선호
+    score[botPrev] += 0.4;
+    score[(botPrev + 1) % NDIR] += 0.2; score[(botPrev + NDIR - 1) % NDIR] += 0.2;
+    var best = botPrev;
+    for (k = 0; k < NDIR; k++) if (score[k] > score[best]) best = k;
+    botPrev = best;
+    dir.x = COS[best]; dir.y = SIN[best];
+  }
+
+  // 레벨업 카드 점수. 높은 쪽을 고르고, 0 이하는 거절한다(무강화 봇만 거절이 나온다).
+  // 보유 무기 레벨업 > 진화 짝 패시브(새로 얻기) > 새 무기(슬롯 채우기) > 진화 짝 패시브 레벨업 > 그 밖의 새 패시브 > 그 밖의 패시브 레벨업
+  function botCardScore(c) {
+    var g = LW.game, i, w = null, p = null;
+    if (c.type === 'heal') return 1;
+    if (c.type === 'weapon') {
+      for (i = 0; i < g.weapons.length; i++) if (g.weapons[i].def.id === c.id) w = g.weapons[i];
+      if (NAIVE) return c.id === 'ember' ? 100 : 0;
+      if (!w) return 60;
+      var evo = LW.EVO_BY_WEAPON[c.id], partner = false;
+      for (i = 0; evo && i < g.passives.length; i++) if (g.passives[i].def.id === evo.passive) partner = true;
+      return 100 + w.lv * 2 + (partner ? 6 : 0);
+    }
+    if (NAIVE) return 0;
+    for (i = 0; i < g.passives.length; i++) if (g.passives[i].def.id === c.id) p = g.passives[i];
+    var isPartner = false;
+    for (i = 0; i < g.weapons.length; i++) {
+      var ev = LW.EVO_BY_WEAPON[g.weapons[i].def.id];
+      if (ev && ev.passive === c.id && !g.weapons[i].evolved) isPartner = true;
+    }
+    if (isPartner) return p ? 40 : 90;
+    return p ? 20 : 30;
+  }
+  function botLevelup(g) {
+    var lu = LW.levelup, best = -1, bs = 0, i;
+    for (i = 0; i < lu.n; i++) {
+      var s = botCardScore(lu.cands[i]);
+      if (s > bs) { bs = s; best = i; }
+    }
+    if (best >= 0) { lu.choose(best); return; }
+    // 거절: 카드를 고르지 않고 레벨업 창만 닫는다(choose의 끝부분과 같은 경로)
+    g.pending--;
+    if (g.pending > 0) lu.open();
+    else g.setState('PLAYING');
+  }
+
+  // 게임 시간 1스텝마다 호출: 플레이어가 원을 그리며 움직인다(봇이면 botMove)
   at.tick = function (dt) {
+    if (BOT) { botMove(dt); LW.input.auto = dir; return; }
     at.angle += dt * 0.5;
     dir.x = Math.cos(at.angle); dir.y = Math.sin(at.angle);
     // 상자와 아이템이 떨어져 있으면 가장 가까운 것 쪽으로 간다(획득 경로 검사). 촛대는 부서져야 해서 목표로 삼지 않는다.
@@ -112,6 +312,7 @@
       if (LW.spawner.skipTo) LW.spawner.skipTo(START);
     }
     stepT = 0; stepRR = 0;
+    if (BOT) { botHook(); botDmg.fill(0); botEvoAt.length = 0; botT = 0; botPrev = 0; }
     if (!buildCfg) return;
     var boostW = START > 0 ? Math.min(7, Math.floor(START / 60)) : 0;
     var boostP = START > 0 ? Math.min(4, Math.floor(START / 200)) : 0;
@@ -305,7 +506,7 @@
       }
       return;
     } else if (g.state === 'LEVELUP') {
-      if (performance.now() - LW.levelup.openedAt >= 500) LW.levelup.choose(0);
+      if (performance.now() - LW.levelup.openedAt >= 500) { if (BOT) botLevelup(g); else LW.levelup.choose(0); }
     } else if (g.state === 'CHEST') {
       var age = performance.now() - LW.chest.openedAt;
       // 상자 창이 열려 있을 때 스냅샷 시각이 지났다면(&snapchest=1이면 시각과 상관없이 다음 스냅샷을) 창이 그려진 뒤에 찍는다
@@ -328,6 +529,11 @@
   // 프레임이 아니라 게임 시간 1스텝마다 호출(game.update에서)
   at.step = function (dt) {
     buildStep(LW.game, dt); eliteStep(LW.game, dt); candleStep(LW.game, dt);
+    if (BOT) {
+      var evN = 0, wl = LW.game.weapons;
+      for (var wi = 0; wi < wl.length; wi++) if (wl[wi].evolved) evN++;
+      while (botEvoAt.length < evN) botEvoAt.push(r2(LW.game.time));
+    }
     // dieat: 판이 이 시각이 되면 HP를 0으로 만든다. 실제 사망 경로(game.update의 hp 검사)를 그대로 탄다.
     roundT += dt;
     // crowd=1: 적 풀을 매 스텝 가득 채운다(special 표시, 상한 무시). 풀이 찬 상태에서 보스가 나오는지 검사한다.
@@ -414,6 +620,19 @@
       snaps: at.snapsTaken
     };
     if (BENCH) res.bench = benchStats(p);
+    if (BOT) {
+      var evoN = 0;
+      for (var q = 0; q < (g.weapons || []).length; q++) if (g.weapons[q].evolved) evoN++;
+      res.bot = {
+        mode: BOT, seed: LW.params.seed,
+        won: !!g.won,
+        deathTime: g.state === 'RESULT' && !g.won ? r2(g.time) : null,   // 사망으로 끝났을 때만. 시간 초과로 멈췄으면 null
+        endTime: r2(g.time || 0),
+        level: g.level || 0, kills: g.kills || 0, evolutions: evoN, evoAt: botEvoAt.slice(),
+        dmgPerMin: Array.prototype.map.call(botDmg, function (v) { return Math.round(v); }),
+        dmgTotal: Math.round(Array.prototype.reduce.call(botDmg, function (a, v) { return a + v; }, 0))
+      };
+    }
     if (LW.params.acct) {
       var Ac = LW.account;
       res.account = {
