@@ -448,16 +448,19 @@ CREATE INDEX best_rank ON best(board, v1 DESC, v2 DESC, achieved_at ASC);
   - 닉네임 규칙, Origin 검사, 요청 제한
 
 ### 11.2 `docker-compose.yml` (OwL-server 레포)
-`authgate` 서비스 뒤에 더한다.
+`authgate` 서비스 뒤에 더한다. 실제 파일이 기준이며, 아래는 그 요약이다.
 
 ```yaml
   game:
     image: python:3.12-alpine
     restart: unless-stopped
+    user: "10001:10001"
     command: ["python", "-u", "/app/game_api.py", "serve"]
+    env_file:
+      - path: ./game.env
+        required: false
     environment:
       TZ: Asia/Seoul
-      GOOGLE_CLIENT_ID: "<사용자가 만든 클라이언트 ID>.apps.googleusercontent.com"
       PUBLIC_ORIGIN: https://game.aovob7.duckdns.org
     expose:
       - "8080"
@@ -465,14 +468,32 @@ CREATE INDEX best_rank ON best(board, v1 DESC, v2 DESC, achieved_at ASC);
       - ./game:/app:ro
       - ./game-data:/data
     mem_limit: 128m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
 ```
 
-- 클라이언트 ID는 공개 값이라 compose에 그대로 적어도 된다. 비밀값은 없다.
+설계 초안과 달라진 점과 이유:
+- 클라이언트 ID는 compose에 적지 않고 `game.env`(`env_file`, 권한 600)에 둔다. 설치 스크립트가 `--client-id`로 값만 바꿀 수 있어야 하고, 그때 compose를 다시 쓰지 않기 위해서다. `required: false`라 파일이 없어도 다른 서비스는 영향받지 않는다(Compose 2.24 이상 필요, 낮으면 설치 스크립트가 compose를 바꾸기 전에 멈춘다).
+- `user: "10001:10001"`: 컨테이너가 root로 돌지 않게 한다. `game-data` 폴더(700)와 `pepper`(600)의 소유자도 10001이어야 하고, `ops/owl-backup`의 `GAME_UID`와 같은 값이다.
+- `read_only`, `tmpfs: /tmp`, `cap_drop: ALL`, `no-new-privileges`, `pids_limit`, `cpus`: 코드에 취약점이 생겨도 파일을 쓰거나 권한을 올릴 여지를 줄이고, 같은 서버의 음악 서비스가 CPU를 빼앗기지 않게 한다. `game_api.py`가 쓰는 곳은 `/data`(SQLite와 WAL, pepper)뿐이고 `/app`은 이미 읽기 전용이라 동작에 영향이 없다.
+- `logging` 상한: 로그가 디스크를 채우지 않게 한다(5MB 3개).
 - 기본 네트워크에 붙는다. caddy가 `game:8080`으로 찾고, 컨테이너는 JWKS를 받으러 바깥으로 나갈 수 있다. `tunnel` 네트워크에는 붙이지 않는다.
-- 적용: `sudo docker compose -f /srv/stack/docker-compose.yml up -d game`. 다른 컨테이너는 다시 만들어지지 않는다(설정이 그대로이므로).
+- 적용: `sudo docker compose -f /srv/stack/docker-compose.yml up -d game`. 다른 컨테이너는 다시 만들어지지 않는다(서비스마다 설정 해시가 따로이고 `depends_on`이 없다). 설치 스크립트가 이 일을 하며, 이미 `game` 블록이 있으면 다시 붙이지 않는다.
 
 ### 11.3 `Caddyfile` (OwL-server 레포)
-`dl.aovob7.duckdns.org` 블록 앞이나 뒤에 더한다.
+`dl.aovob7.duckdns.org` 블록 뒤에 더한다. 실제 파일이 기준이며, 아래는 그 요약이다.
 
 ```
 game.aovob7.duckdns.org {
@@ -481,13 +502,17 @@ game.aovob7.duckdns.org {
 		Content-Security-Policy "frame-ancestors 'none'"
 		X-Content-Type-Options nosniff
 	}
-	# Game API: accounts, run uploads, leaderboard (game service, Python stdlib + SQLite).
 	handle /api/* {
+		request_body {
+			max_size 64KB
+		}
 		reverse_proxy game:8080 {
 			header_up X-Real-IP {remote_host}
+			transport http {
+				read_timeout 20s
+			}
 		}
 	}
-	# Game files: static PWA, "current" switches atomically on deploy (tools/deploy.sh).
 	handle {
 		root * /srv/owl-web/game/current
 		@nocache path / /index.html /sw.js /manifest.webmanifest
@@ -499,28 +524,43 @@ game.aovob7.duckdns.org {
 }
 ```
 
-- 적용 순서(HANDOFF 13장 방식): `sudo sh -c 'cat 새파일 > /srv/stack/Caddyfile'`로 내용만 덮어쓰고 `sudo docker exec stack-caddy-1 caddy reload --config /etc/caddy/Caddyfile`. game 서비스를 먼저 올린 뒤 reload한다. 순서가 바뀌어도 `/api`가 잠깐 502일 뿐 정적 파일은 나간다.
+설계 초안과 달라진 점과 이유:
+- `request_body max_size 64KB`: 서버의 본문 상한(32KB)보다 앞에서 큰 요청을 끊는다.
+- `read_timeout 20s`: 느리게 보내는 연결이 서버 스레드를 오래 붙잡지 않게 한다.
+- `header_up X-Real-IP {remote_host}`: 클라이언트가 보낸 값을 덮어쓴다. `game_api.py`는 요청 제한에 `X-Real-IP`만 쓴다.
+- 적용은 설치 스크립트가 한다. 내용만 덮어쓰고(`cat > Caddyfile`, inode 유지), `caddy validate`가 실패하거나 `caddy reload`가 실패하면 이번 실행에서 만든 백업으로 되돌린다. reload 실패 때 되돌리는 이유는, Caddy는 옛 설정으로 계속 돌지만 디스크의 새 블록이 재시작 때 읽혀 모든 사이트가 멈출 수 있기 때문이다. game 서비스를 먼저 올린 뒤 reload한다.
 - `/srv/owl-web`은 caddy에 이미 읽기 전용으로 마운트되어 있으므로 compose를 고치지 않는다. 음악 앱의 root는 `/srv/owl-web/current`라서 게임 파일이 owl 도메인으로 노출되지 않는다.
 - DuckDNS는 하위 주소도 같은 IP로 응답하므로 DNS 작업은 없다. 인증서는 reload 때 Caddy가 자동으로 받는다.
+- `setup.sh`를 다시 실행하면 Caddyfile과 compose가 옛 내용으로 돌아가 `game` 블록이 빠질 수 있다. OwL-server `HANDOFF.md`에 대처 방법이 있다.
 
 ### 11.4 백업과 감시 (OwL-server 레포)
-- `ops/owl-backup`: Gonic DB처럼 SQLite 일관 사본을 만든다.
+- `ops/owl-backup`: Gonic DB처럼 SQLite 일관 사본을 만든다. 구현은 `python:3.12-alpine` 이미지로, game 서비스와 같은 비루트(10001)로 돌린다.
   ```
-  docker run --rm -v /srv/stack/game-data:/d:ro -v "$TMP":/o alpine:3.20 \
-    sh -c 'apk add -q sqlite >/dev/null && sqlite3 /d/game.db ".backup /o/game.db"'
+  docker run --rm --user 10001:10001 -v /srv/stack/game-data:/d -v "$TMP/g":/o python:3.12-alpine \
+    python -c 'import sqlite3; s = sqlite3.connect("/d/game.db"); d = sqlite3.connect("/o/game.db"); s.backup(d); d.close(); s.close()'
   ```
-  tar 목록에 `srv/stack/game-data/pepper`와 `-C "$TMP" game.db`를 더한다. 실행 중인 `game.db`, `-wal`, `-shm` 파일은 넣지 않는다. 읽기 전용 마운트에서 WAL 모드 DB를 `.backup`할 수 있는지는 확인 필요(안 되면 `:ro`를 뺀다).
-- `ops/owl_monitor.py`: `SERVICES`에 `"stack-game-1"`을 더한다.
-- `HANDOFF.md`: 1장 서비스 표에 `game`(게임 API), 주소 목록에 `game.<도메인>`, 11장 백업 대상에 game DB를 적는다.
+  tar 목록에 `srv/stack/game-data/pepper`, `srv/stack/game.env`와 `game.db` 사본을 더한다(있는 것만). 실행 중인 `game.db`, `-wal`, `-shm` 파일은 넣지 않는다.
+  - 설계 초안은 `alpine` 이미지와 `sqlite3` 명령, 읽기 전용 마운트였다. 구현은 `apk add`로 패키지를 받지 않아도 되고, WAL 모드 DB를 읽기 전용 마운트에서 열 때의 문제를 피하고, 새 파일이 root 소유로 남지 않도록 파이썬 이미지를 비루트로 돌린다.
+  - 게임 쪽이 실패해도 OwL 아카이브는 끝까지 올린 뒤 마지막에 exit 1로 끝난다(모니터가 메일을 보낸다). 원인은 journal의 "game.db backup failed" 줄이다.
+  - `pepper`는 계정 식별자를 만드는 키라 다시 만들 수 없어서, "비밀값은 백업에서 뺀다"는 원칙의 예외로 넣는다. 버킷은 비공개이고 인스턴스만 쓸 수 있다.
+  - 복구 때는 파일을 푼 뒤 `chown -R 10001:10001 /srv/stack/game-data`, `chmod 700`, `chmod 600 pepper`를 해야 컨테이너가 시작한다.
+  - 새 `owl-backup`은 서버의 `/usr/local/sbin/owl-backup`에 설치해야 효력이 있다. 게임 레포의 묶음에 넣어 `install-game.sh`가 설치하고 한 번 실행한다.
+- `ops/owl_monitor.py`: `stack-game-1` 점검과 `https://game.<도메인>/api/health` 점검(응답에 `"ok":true`)을 더한다. 모니터는 집 PC에서 레포 파일을 바로 실행하므로, 설치 전에 오탐 메일이 나가지 않게 상태 폴더의 `game-enabled` 파일이 있을 때만 게임 점검을 한다.
+- `HANDOFF.md`: 서비스 표에 `game`, 주소 목록에 `game.<도메인>`, 백업 대상에 game DB, 게임 서버 절(설치, 운영, 복구)을 적는다.
 
-### 11.5 배포 (`tools/deploy.sh`, 게임 레포)
+### 11.5 배포 (`tools/deploy.sh`, `deploy/install-game.sh`, 게임 레포)
 OwL 프런트처럼 릴리스 폴더와 링크 교체로 한 번에 바꾼다. 파일을 덮어쓰는 도중에 SW가 설치되면 옛 파일과 새 파일이 섞여 캐시될 수 있기 때문이다.
 
-1. 처음 한 번(서버): `sudo install -d -o ubuntu -g ubuntu /srv/owl-web/game /srv/owl-web/game/releases`, `sudo install -d /srv/stack/game /srv/stack/game-data`.
-2. 정적 파일: `rsync -a --delete` 로 `index.html`, `manifest.webmanifest`, `sw.js`, `js/`, `icons/`를 `/srv/owl-web/game/releases/<버전>/`에 올린다. 이어서 `ln -sfn releases/<버전> /srv/owl-web/game/current.tmp && mv -T /srv/owl-web/game/current.tmp /srv/owl-web/game/current`. 릴리스는 최근 5개만 남긴다.
-3. 서버 코드(바뀐 경우만): `server/game_api.py`, `server/bounds.json`을 `/tmp`로 보낸 뒤 `sudo install -m 644`로 `/srv/stack/game/`에 두고 `sudo docker compose -f /srv/stack/docker-compose.yml restart game`.
-4. 접속 정보는 환경 변수 `GAME_SSH`(예: `ubuntu@<서버>`)와 키 `~/.ssh/owl-server`로 받는다. 게임 레포에 서버 주소를 적지 않는다.
-- 로컬에 `rsync`가 있는지는 확인 필요(본 설계 6.7과 같음). 없으면 `tar`로 묶어 `ssh`로 풀어 넣는다.
+설계 초안은 `rsync`와 `ssh`로 서버에 직접 올리는 방식이었다. 구현은 서버에 접속하지 않는 묶음 방식이다. 게임 레포에 서버 주소와 접속 키를 두지 않아도 되고, 같은 설치 스크립트를 여러 번 실행해도 안전하게 만들 수 있기 때문이다.
+
+1. 로컬: `bash tools/deploy.sh`가 `deploy/dist/lanternwake-game.tar.gz`를 만든다. 내용은 `install-game.sh`, `VERSION`, `static.sha256`, `static/`(`index.html`, `manifest.webmanifest`, `sw.js`, `js/`, `icons/`), `server/`(`game_api.py`, `bounds.json`), `stack/`(OwL-server의 game compose 블록, Caddy 블록, `owl-backup`)이다. `sw.js`의 버전과 목록이 맞는지(`node tools/release.js`를 돌렸는지) 먼저 검사한다.
+2. 옮기기: 사용자가 평소 쓰는 방법으로 `scp`한다(`deploy/README.md`).
+3. 서버: `sudo bash install-game.sh` 한 번. 순서는 폴더와 `pepper`(없을 때만 생성)와 `game.env`, 정적 파일 풀기와 `current` 링크 교체(`mv -T`, 릴리스는 최근 3개만 유지), 서버 코드 두기, compose와 Caddyfile에 블록 덧붙이기(없을 때만), game 컨테이너 올리기, `caddy validate`와 reload(실패하면 되돌림), `owl-backup` 설치와 실행(실패해도 경고만), 헬스 체크, 마지막에 `journalctl -u owl-backup -n 30` 출력이다.
+   - 릴리스를 3개만 두는 이유: 되돌릴 수 있는 만큼이면 충분하고, 정적 파일이 약 400KB라도 서버 디스크를 아끼기 위해서다(설계 초안은 5개).
+   - 헬스 체크는 서버 안에서 `curl --resolve game.aovob7.duckdns.org:443:127.0.0.1`로 한다. 서버가 자기 공인 IP로 나갔다 돌아오는 경로(헤어핀)에 기대지 않으면서 Caddy, 인증서, game 컨테이너를 모두 거친다.
+   - 중간에 실패해도 다시 실행하면 이어서 진행한다. 임시 파일은 종료 때 지운다.
+4. 구글 클라이언트 ID는 나중에 `sudo bash /srv/stack/game/install-game.sh --client-id <ID>.apps.googleusercontent.com`으로 값만 바꾼다. ID가 없는 동안에도 서버와 헬스 체크는 동작하고 로그인만 안 된다.
+- 로컬 시험: `bash deploy/test-install.sh`(가짜 루트와 가짜 docker, curl, systemctl, journalctl로 반복 실행, 되돌림, 백업 실패를 검사한다).
 - 본 설계 6.7의 Caddy 블록과 `/srv/game` 경로는 11.3, 11.5로 대체한다.
 
 ---
