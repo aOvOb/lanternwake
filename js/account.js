@@ -42,7 +42,8 @@
   // ===== 로그인 상태 =====
   function applyMe(d) {
     var u = d.user;
-    if (acc.uid !== u.id) acc.importDone = false;      // 다른 계정이면 이 기기의 가져오기 기록은 새로 시작
+    var switched = acc.uid !== u.id;
+    if (switched) acc.importDone = false;               // 다른 계정이면 이 기기의 가져오기 기록은 새로 시작
     A.loggedIn = true; A.verified = true;
     A.uid = acc.uid = u.id;
     A.nickname = acc.nickname = u.nickname;
@@ -50,6 +51,7 @@
     acc.imported = !!d.imported;
     acc.records = recordsOf(d.records);
     LW.storage.saveAccount(acc);
+    if (switched) rebuildBoards(true);                  // 이전 계정의 "내 순위"와 강조 줄을 지운다
   }
   function recordsOf(r) {
     return { bestTimeMs: r.bestTimeMs | 0, bestKills: r.bestKills | 0, bestLevel: r.bestLevel | 0, wins: r.wins | 0, runs: r.runs | 0, fullDawns: r.fullDawns | 0 };
@@ -65,6 +67,7 @@
     LW.storage.saveTickets(tickets);
     reserved = null; fresh = null;
     A.promptNick = false;
+    rebuildBoards(true);
   }
 
   // 서버에서 내 정보를 받아 적용하고, 설정 동기화, 기록 가져오기, 표 채우기, 대기열 올리기를 이어서 한다.
@@ -136,11 +139,11 @@
   A.logout = function () {
     return net.post('auth/logout', {}, 6000).then(function (r) {
       if (r.netError) { say('오프라인이라 로그아웃할 수 없어요'); return false; }
+      // 서버 세션이 살아 있는데 로컬만 게스트로 바꾸면 다음 실행 때 다시 로그인되므로, 성공(또는 이미 세션 없음)일 때만 바꾼다
+      if (!r.ok && r.status !== 401) { say('로그아웃하지 못했어요. 다시 시도해 주세요'); return false; }
       toGuest();
       return true;
     });
-      // 서버 세션이 살아 있는데 로컬만 게스트로 바꾸면 다음 실행 때 다시 로그인되므로, 성공(또는 이미 세션 없음)일 때만 바꾼다
-      if (!r.ok && r.status !== 401) { say('로그아웃하지 못했어요. 다시 시도해 주세요'); return false; }
   };
 
   A.deleteAccount = function () {
@@ -166,6 +169,7 @@
       if (r.ok && r.data && r.data.nickname) {
         A.nickname = acc.nickname = r.data.nickname; A.nicknameSet = acc.nicknameSet = true;
         LW.storage.saveAccount(acc);
+        rebuildBoards(false);                             // 강조 줄만 새 닉네임으로 다시 계산한다
         return { ok: true };
       }
       var e = r.data && r.data.error;
@@ -411,6 +415,20 @@
     else A.boards[b] = { rows: [], meStr: '', hasMe: false, updatedAt: 0, fetchedAt: 0, stale: true, loading: false, error: false, raw: null };
   });
   function invalidateBoards() { A.boardDirty = true; }
+
+  // 저장본으로 두 보드를 다시 만들어 mine(내 줄 강조)을 지금 계정 기준으로 다시 계산한다.
+  // clearMe 이면 저장본의 내 순위(me)도 지운다(로그아웃, 계정 전환).
+  function rebuildBoards(clearMe) {
+    ['time', 'kills'].forEach(function (b) {
+      var s = saved[b], old = A.boards[b];
+      if (!s || !s.entries) return;
+      if (clearMe) s.me = null;
+      var nb = prepare(b, s, s.fetchedAt | 0);
+      nb.stale = old ? old.stale : true; nb.loading = old ? old.loading : false; nb.error = old ? old.error : false;
+      A.boards[b] = nb;
+    });
+    LW.storage.saveBoard(saved);
+  }
 
   // 성공하면 저장하고, 실패하면 저장본을 그대로 둔 채 stale(저장본) 표시를 켠다
   A.fetchBoard = function (board) {

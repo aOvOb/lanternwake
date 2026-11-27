@@ -64,6 +64,11 @@ function makeEnv() {
       });
       return reply(200, { results, records: { bestTimeMs: 1000, bestKills: 5, bestLevel: 2, wins: 0, runs: body.runs.length, fullDawns: 0 } });
     }
+    if (p === 'auth/logout') return reply(srv.logoutStatus || 200, srv.logoutStatus ? { error: 'x' } : { ok: true });
+    if (p.indexOf('leaderboard') === 0) {
+      return reply(200, { entries: [{ rank: 1, nickname: '테스터', timeMs: 90000, kills: 40, fullDawn: false }, { rank: 2, nickname: '다른사람', timeMs: 80000, kills: 30, fullDawn: false }],
+        me: { rank: 1, timeMs: 90000, kills: 40 }, updatedAt: 5 });
+    }
     return reply(404, { error: 'not_found' });
   };
   vm.createContext(sandbox);
@@ -302,6 +307,50 @@ async function test(name, fn) {
     LW.params.devLogin = 'tester';
     A.onRunStart(); A.onRunEnd(fakeGame({ time: 40, kills: 3, level: 2 })); await settle();
     assert.ok(srv.log.some((l) => l.path === 'runs'), 'devlogin 이면 제출한다');
+  });
+
+  await test('로그아웃: 서버가 실패(5xx, 429, 403)하면 로그인 상태를 유지하고, 성공이나 401 이면 게스트로 돌아간다', async () => {
+    for (const code of [500, 429, 403]) {
+      const { LW, srv } = await loggedIn();
+      srv.logoutStatus = code;
+      const ok = await LW.account.logout();
+      assert.strictEqual(ok, false, String(code));
+      assert.strictEqual(LW.account.loggedIn, true, String(code));
+      assert.ok(LW.account.msg.indexOf('로그아웃하지 못했어요') === 0);
+    }
+    for (const code of [0, 401]) {
+      const { LW, srv } = await loggedIn();
+      srv.logoutStatus = code;
+      assert.strictEqual(await LW.account.logout(), true, String(code));
+      assert.strictEqual(LW.account.loggedIn, false, String(code));
+    }
+  });
+
+  await test('로그아웃 뒤 순위표 저장본에 이전 계정의 강조 줄과 내 순위가 남지 않는다', async () => {
+    const { LW, store } = await loggedIn();
+    const A = LW.account;
+    await A.fetchBoard('time');
+    assert.strictEqual(A.boards.time.rows[0].mine, true);
+    assert.ok(A.boards.time.meStr.indexOf('내 순위 1위') === 0);
+    await A.logout();
+    assert.strictEqual(A.boards.time.rows[0].mine, false);
+    assert.strictEqual(A.boards.time.meStr, '');
+    assert.strictEqual(A.boards.time.hasMe, false);
+    assert.strictEqual(JSON.parse(store['lanternwake.v1.board']).time.me, null);
+  });
+
+  await test('닉네임을 바꾸면 순위표 강조 줄을 새 닉네임으로 다시 계산한다', async () => {
+    const { LW, srv } = await loggedIn();
+    const A = LW.account;
+    await A.fetchBoard('time');
+    assert.strictEqual(A.boards.time.rows[1].mine, false);
+    const orig = LW.net.put;
+    LW.net.put = () => Promise.resolve({ ok: true, status: 200, data: { nickname: '다른사람' } });
+    const r = await A.setNickname('다른사람');
+    LW.net.put = orig;
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(A.boards.time.rows[0].mine, false);
+    assert.strictEqual(A.boards.time.rows[1].mine, true);
   });
 
   await test('게스트: 서버를 부르지 않고 안내 줄만 남긴다', async () => {
