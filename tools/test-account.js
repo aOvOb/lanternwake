@@ -288,6 +288,22 @@ async function test(name, fn) {
     assert.strictEqual(A.ticketCount(), 6, '예약한 표와 새 표가 모두 풀로 돌아온다');
   });
 
+  await test('시험 매개변수(cheat)가 켜진 판은 제출하지 않고 표를 돌려놓는다, devlogin 이면 제출한다', async () => {
+    const { LW, srv } = await loggedIn();
+    const A = LW.account;
+    LW.params.cheat = true;
+    A.onRunStart(); await settle();
+    srv.log.length = 0;
+    A.onRunEnd(fakeGame({ time: 900, kills: 9, level: 9, won: true })); await settle();
+    assert.strictEqual(A.resultLine, '시험 모드: 순위 제외');
+    assert.strictEqual(A.queueCount(), 0);
+    assert.ok(srv.log.every((l) => l.path !== 'runs'), '제출하지 않는다');
+    assert.ok(A.ticketCount() >= 5, '표가 풀로 돌아온다');
+    LW.params.devLogin = 'tester';
+    A.onRunStart(); A.onRunEnd(fakeGame({ time: 40, kills: 3, level: 2 })); await settle();
+    assert.ok(srv.log.some((l) => l.path === 'runs'), 'devlogin 이면 제출한다');
+  });
+
   await test('게스트: 서버를 부르지 않고 안내 줄만 남긴다', async () => {
     const env = makeEnv();
     env.srv.up = false;

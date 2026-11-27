@@ -51,6 +51,11 @@ window.LW = window.LW || {};
     seed: Math.floor(Number(q.get('seed'))) || 12345
   };
 
+  // 시험용 매개변수가 하나라도 켜지면 cheat: 그 판은 순위에 올리지 않는다(account.onRunEnd).
+  // 개발용 로그인(devlogin)을 쓰는 자동 검사는 예외로 제출한다.
+  var P = LW.params;
+  P.cheat = !!(P.god || P.stress || P.debug || P.start > 0 || P.build || P.elite || P.candle || P.crowd || P.killLast || P.bench > 0 || P.burn > 0);
+
   // 계정 API(같은 출처). 게스트로 바로 플레이하고 서버가 없으면 계정 기능만 "오프라인"이 된다.
   LW.API = './api/';
   LW.ACCOUNT = isSecureContext && !LW.params.noacct && (LW.params.autotest === 0 || LW.params.acct);

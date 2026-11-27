@@ -309,6 +309,7 @@
   A.onRunEnd = function (g) {
     runSeq++;                       // 이 판의 늦은 표 응답은 pool 로 간다
     if (!A.enabled) return;
+    if (LW.params.cheat && !LW.params.devLogin) { A.resultLine = '시험 모드: 순위 제외'; releaseRun(); return; }
     if (!A.loggedIn) { A.resultLine = '로그인하면 순위에 오를 수 있어요'; reserved = null; fresh = null; return; }
     var s = buildSummary(g);
     var t = fresh || reserved;
