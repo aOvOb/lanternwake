@@ -309,6 +309,7 @@
 
   // 등불 빛 번짐
   function buildGlow() {
+    if (R.glow) return;     // 크기가 고정이라 한 번만 만든다
     var c = makeCanvas(128, 128), cx = c.getContext('2d');
     var g = cx.createRadialGradient(64, 64, 0, 64, 64, 64);
     g.addColorStop(0, 'rgba(255,190,90,0.7)');
@@ -354,7 +355,10 @@
   // 비네트: 캔버스 전체 크기로 한 번만 만든다
   function buildVignette() {
     var cv = LW.canvas;
-    var c = makeCanvas(cv.width, cv.height), cx = c.getContext('2d');
+    // 캔버스 객체는 재사용하고 크기만 다시 지정한다(iOS 캔버스 메모리 한도 대비)
+    var c = R.vig || document.createElement('canvas');
+    c.width = Math.max(1, cv.width); c.height = Math.max(1, cv.height);
+    var cx = c.getContext('2d');
     var w = c.width, h = c.height, rr = Math.sqrt(w * w + h * h) / 2;
     var g = cx.createRadialGradient(w / 2, h / 2, rr * 0.45, w / 2, h / 2, rr);
     g.addColorStop(0, 'rgba(0,0,0,0)');
