@@ -4,7 +4,7 @@
   LW.audio = {
     init: nop, suspend: nop, resume: nop,
     hit: nop, gem: nop, levelup: nop, hurt: nop, chest: nop,
-    bossWarn: nop, win: nop, lose: nop, start: nop,
+    bossWarn: nop, win: nop, lose: nop, start: nop, pickup: nop, candle: nop,
     vibrate: function (ms) {
       if (!LW.settings.vibrate) return;
       try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 무시 */ }

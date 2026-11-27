@@ -20,6 +20,7 @@
   // 반경 r 안의 모든 적에게 피해. 중심에서 바깥 방향으로 넉백. 맞힌 수를 돌려준다.
   LW.damageCircle = function (x, y, r, dmg, slot, kb) {
     var buf = LW.qbuf, items = LW.enemies.items, hit = 0;
+    LW.hitCandles(x, y, r);      // 촛대도 같은 범위에 닿으면 부서진다(qbuf를 쓰지 않는다)
     var m = LW.grid.queryRadius(x, y, r + LW.MAX_ENEMY_R, buf);
     for (var k = 0; k < m; k++) {
       var e = items[buf[k]];
@@ -124,6 +125,7 @@
         var a = w.ang + i * TAU / n;
         var x = P.x + Math.cos(a) * R, y = P.y + Math.sin(a) * R;
         w.px[i] = x; w.py[i] = y;
+        LW.hitCandles(x, y, rad);
         var m = grid.queryRadius(x, y, rad + LW.MAX_ENEMY_R, buf);
         for (var k = 0; k < m; k++) {
           var e = items[buf[k]];
@@ -150,6 +152,7 @@
       if (w.tickT <= 0) {
         w.tickT += L.tick;
         w.pulse = 0.12;
+        LW.hitCandles(P.x, P.y, R);
         var buf = LW.qbuf, items = LW.enemies.items, cnt = 0, dmg = L.dmg * S.might;
         var m = LW.grid.queryRadius(P.x, P.y, R + LW.MAX_ENEMY_R, buf);
         for (var k = 0; k < m; k++) {
@@ -191,6 +194,7 @@
         if (ar) { ar.ang = a; ar.flag = circle ? 1 : 0; }
         if (circle) break;
       }
+      LW.hitCandlesFan(P.x, P.y, range, w.px, w.py, circle ? 1 : n, cosHalf, circle);
       var buf = LW.qbuf, items = LW.enemies.items;
       var m = LW.grid.queryRadius(P.x, P.y, range + LW.MAX_ENEMY_R, buf);
       for (var k = 0; k < m; k++) {
@@ -371,7 +375,9 @@
     e.active = false;
     g.kills++;
     LW.spawnGem(e.x, e.y, e.xp);
-    if (e.elite) LW.dropChest(e.x, e.y, false);
+    // 기름: 일반 적 0.3%, 엘리트는 상자와 함께 50%
+    if (e.elite) { LW.dropChest(e.x, e.y, false); if (LW.rand() < 0.5) LW.dropOil(e.x + 16, e.y, true); }
+    else if (!e.boss && LW.rand() < 0.003) LW.dropOil(e.x, e.y, false);
     if (e.boss) { LW.dropChest(e.x, e.y, true); g.bossKilled = (g.bossKilled || 0) + 1; }
     // 부푼 포자: 0.6초 예고 뒤 반경 55 폭발(플레이어 피해 14). 질의 없이 장판으로 미룬다
     if (e.def.id === 'spore') LW.areas.add(LW.AREA.TELE, 0, e.x, e.y, 55, 14, 0.6);

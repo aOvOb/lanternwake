@@ -6,7 +6,9 @@
     state: 'TITLE',
     time: 0, kills: 0, level: 1, xp: 0, xpNeed: LW.xpReq(1), pending: 0,
     weapons: [], passives: [], chestN: 0, chestB: 0, chestsOpened: 0, bossesSeen: [], bannerText: '', bannerT: 0, dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
-    god: false, won: false
+    god: false, won: false,
+    mapStats: { candleSpawned: 0, candleBroken: 0, candleMax: 0, oil: 0, bell: 0, light: 0, purified: 0 },
+    toastText: '', toastT: 0, flashT: 0
   };
   var perf = LW.perf = {
     updSum: 0, updN: 0, rndSum: 0, rndN: 0, updLast: 0, rndLast: 0, fps: 60, maxEnemies: 0, maxNormal: 0
@@ -33,6 +35,9 @@
     g.passives = [];
     g.chestN = 0; g.chestB = 0; g.chestsOpened = 0;
     g.bossesSeen = []; g.bannerT = 0; g.bossKilled = 0;
+    g.toastT = 0; g.flashT = 0;
+    var ms = g.mapStats;
+    ms.candleSpawned = 0; ms.candleBroken = 0; ms.candleMax = 0; ms.oil = 0; ms.bell = 0; ms.light = 0; ms.purified = 0;
     LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset(); LW.ebullets.reset();
     LW.gems.reset(); LW.pickups.reset(); LW.effects.reset();
     LW.player.reset();
@@ -60,6 +65,9 @@
     }
   };
 
+  // 화면 위쪽에 잠깐 보이는 안내 글(맵 아이템을 받았을 때)
+  g.toast = function (t) { g.toastText = t; g.toastT = 2; };
+
   // 상자를 받는다. 실제로 여는 것은 갱신 11단계다.
   g.giveChest = function (boss) { if (boss) g.chestB++; else g.chestN++; };
 
@@ -86,6 +94,8 @@
     // 1. 시간
     g.time += dt;
     if (g.bannerT > 0) g.bannerT -= dt;
+    if (g.toastT > 0) g.toastT -= dt;
+    if (g.flashT > 0) g.flashT -= dt;
     if (g.time >= LW.WIN_TIME) { g.end(true); return; }
     LW.spawner.update(dt);                 // 2
     P.update(dt);                          // 3

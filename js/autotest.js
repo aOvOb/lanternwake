@@ -2,7 +2,7 @@
 // 오류를 모으고, 플레이어를 자동으로 움직이고, N초가 지나면 결과 JSON을 <pre id="autotest">에 쓴다.
 // 결과 JSON: ok는 "수집된 오류가 없음", reached는 "목표 시각에 도달했거나 승리", died는 "사망으로 끝남"이다.
 // 보조 옵션: &start=초(그 시각부터 시작, N은 그 뒤로 더 돌 시간), &build=all|alt(시작 빌드와 자동 레벨업),
-//           &god=1(무적), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
+//           &god=1(무적), &elite=1(15초마다 엘리트), &candle=1(6초마다 가까운 촛대), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
 (function () {
   var N = LW.params.autotest;
   var START = LW.params.start;
@@ -39,9 +39,10 @@
   at.tick = function (dt) {
     at.angle += dt * 0.5;
     dir.x = Math.cos(at.angle); dir.y = Math.sin(at.angle);
-    // 상자가 떨어져 있으면 가장 가까운 상자 쪽으로 간다(상자 획득 경로 검사)
+    // 상자와 아이템이 떨어져 있으면 가장 가까운 것 쪽으로 간다(획득 경로 검사). 촛대는 부서져야 해서 목표로 삼지 않는다.
     var pk = LW.pickups, P = LW.player, best = 1e12;
     for (var i = 0; i < pk.n; i++) {
+      if (pk.items[i].kind === LW.PK.CANDLE) continue;
       var dx = pk.items[i].x - P.x, dy = pk.items[i].y - P.y, d2 = dx * dx + dy * dy;
       if (d2 < best && d2 < 640000) { best = d2; var d = Math.sqrt(d2) || 1; dir.x = dx / d; dir.y = dy / d; }
     }
@@ -84,6 +85,16 @@
     }
     LW.player.recomputeStats();
   };
+
+  var candleT = 0;
+  // &candle=1: 6초마다 가까운 곳에 촛대를 만든다(촛대 부수기, 세 아이템 경로 검사용)
+  function candleStep(g, dt) {
+    if (!LW.params.candle) return;
+    candleT += dt;
+    if (candleT < 6) return;
+    candleT -= 6;
+    LW.spawnCandle(true);
+  }
 
   var eliteT = 0, eliteRR = 0;
   // &elite=1: 15초마다 엘리트를 하나 만든다(엘리트, 상자 경로 검사용)
@@ -147,7 +158,7 @@
   };
 
   // 프레임이 아니라 게임 시간 1스텝마다 호출(game.update에서)
-  at.step = function (dt) { buildStep(LW.game, dt); eliteStep(LW.game, dt); };
+  at.step = function (dt) { buildStep(LW.game, dt); eliteStep(LW.game, dt); candleStep(LW.game, dt); };
 
   function round(v, k) { var m = Math.pow(10, k); return Math.round(v * m) / m; }
 
@@ -181,6 +192,7 @@
       spawned: LW.spawner && LW.spawner.spawned ? LW.spawner.spawned : {},
       maxNormal: p.maxNormal || 0,
       chestsOpened: g.chestsOpened || 0,
+      mapItems: g.mapStats || {},
       snaps: at.snapsTaken
     };
     var pre = document.createElement('pre');

@@ -19,6 +19,8 @@
     if (P.hp > P.maxHp) P.hp = P.maxHp;
   };
 
+  P.heal = function (n) { P.hp = Math.min(P.maxHp, P.hp + n); };
+
   P.reset = function () {
     P.x = 0; P.y = 0;
     P.invuln = 0; P.facing = 1; P.lastDx = 1; P.lastDy = 0; P.animT = 0;

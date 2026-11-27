@@ -60,6 +60,7 @@
       p.x += p.vx * dt; p.y += p.vy * dt;
       p.life -= dt;
       if (p.life <= 0) { pool.remove(i); continue; }
+      LW.hitCandles(p.x, p.y, p.r);
 
       var m = grid.queryRadius(p.x, p.y, p.r + maxR, buf);
       for (var k = 0; k < m; k++) {

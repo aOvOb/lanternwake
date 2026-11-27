@@ -190,6 +190,7 @@
         else if (code === 'KeyE') dbgElite();
         else if (code === 'KeyB') dbgBoss();
         else if (code === 'KeyC') g.giveChest(false);
+        else if (code === 'KeyK') LW.spawnCandle(true);
       }
     } else if (st === 'PAUSED') {
       if (code === 'Escape' || code === 'KeyP' || code === 'Enter') g.setState('PLAYING');
@@ -291,6 +292,22 @@
       ctx.fillStyle = 'rgba(150,20,30,0.8)'; ctx.fillRect(0, by2, v.w, h);
       ctx.fillStyle = '#ff6a6a'; ctx.fillRect(0, by2, v.w, 3); ctx.fillRect(0, by2 + h - 3, v.w, 3);
       text(ctx, g.bannerText, v.w / 2, by2 + h / 2, 20, '#ffffff');
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // 맵 아이템 안내 글과 정화의 빛 섬광
+  function drawToast(ctx, g) {
+    var v = LW.view;
+    if (g.flashT > 0) {
+      ctx.globalAlpha = Math.min(1, g.flashT / 0.35) * 0.65;
+      ctx.fillStyle = '#f4fbff';
+      ctx.fillRect(0, 0, v.w, v.h);
+      ctx.globalAlpha = 1;
+    }
+    if (g.toastT > 0) {
+      ctx.globalAlpha = g.toastT > 0.5 ? 1 : g.toastT / 0.5;
+      text(ctx, g.toastText, v.w / 2, v.h * 0.3, 18, '#ffe9a8');
       ctx.globalAlpha = 1;
     }
   }
@@ -467,6 +484,7 @@
     var v = LW.view, i, st = g.state;
     drawHud(ctx, g);
     drawBoss(ctx, g);
+    drawToast(ctx, g);
     if (st === 'PLAYING') drawJoystick(ctx);
     for (i = 0; i < nBtn && st !== 'LEVELUP'; i++) {
       if (btns[i].id === 'resume' || btns[i].id === 'retry' || btns[i].id === 'title' || btns[i].id === 'chest_ok') continue;

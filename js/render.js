@@ -398,26 +398,103 @@
     }
   }
 
+  // 맵 아이템 그리기. 빛 번짐은 미리 그린 스프라이트를 쓴다.
+  function glowAt(ctx, x, y, size, alpha) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(R.glow, x - size / 2, y - size / 2, size, size);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
   // 상자: 갈색 상자와 금색 걸쇠. 보스 상자는 보라색에 더 크다
-  function drawChests(ctx, l, r, t, b) {
+  function drawChest(ctx, it, bob) {
+    var boss = it.kind === 1, k = boss ? 1.5 : 1;
+    glowAt(ctx, it.x, it.y + bob, 56 * k, 0.6);
+    var w = 18 * k, h = 13 * k, x = it.x - w / 2, y = it.y - h / 2 + bob;
+    roundRect(ctx, x, y, w, h, 2.5);
+    ctx.fillStyle = boss ? '#6a3a8a' : '#8a5a34'; ctx.fill();
+    ctx.lineWidth = 1.6; ctx.strokeStyle = '#2b1a0e'; ctx.stroke();
+    ctx.fillStyle = boss ? '#4a2866' : '#6e4524';
+    ctx.fillRect(x + 1, y + 1, w - 2, h * 0.35);
+    ctx.fillStyle = '#ffd34d';
+    ctx.fillRect(it.x - 2 * k, y + h * 0.3, 4 * k, 5 * k);
+  }
+
+  // 촛대: 어두운 금속 받침과 밀랍 기둥, 위에 불꽃. 아무 공격에나 부서진다
+  function drawCandle(ctx, it) {
+    var x = it.x, y = it.y, fl = 1 + 0.12 * Math.sin(R.time * 11 + x);
+    glowAt(ctx, x, y - 8, 48, 0.45);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#1c1a16';
+    ctx.fillStyle = '#4a4640';
+    roundRect(ctx, x - 6, y + 6, 12, 4, 1.5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ece0b8';
+    roundRect(ctx, x - 3.2, y - 8, 6.4, 15, 1.5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#c9b98a';
+    ctx.fillRect(x + 0.6, y - 7, 1.8, 13);
+    LW.drawFlame(ctx, x, y - 13, 8 * fl);
+  }
+
+  // 등잔 기름: 둥근 병과 노란 기름
+  function drawOil(ctx, it, bob) {
+    var x = it.x, y = it.y + bob;
+    glowAt(ctx, x, y, 36, 0.5);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#2b1a0e';
+    ctx.fillStyle = '#d9a441';
+    circle(ctx, x, y + 1.5, 6.5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#8a5a34';
+    ctx.fillRect(x - 2.2, y - 9, 4.4, 4); ctx.strokeRect(x - 2.2, y - 9, 4.4, 4);
+    ctx.fillStyle = 'rgba(255,246,208,0.8)';
+    circle(ctx, x - 2.2, y - 0.5, 1.6); ctx.fill();
+  }
+
+  // 끌개 종: 금색 종
+  function drawBell(ctx, it, bob) {
+    var x = it.x, y = it.y + bob;
+    glowAt(ctx, x, y, 40, 0.5);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#3a2a08';
+    ctx.fillStyle = '#e8b830';
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y + 6); ctx.quadraticCurveTo(x - 7, y - 8, x, y - 8);
+    ctx.quadraticCurveTo(x + 7, y - 8, x + 8, y + 6); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff1a8';
+    ctx.fillRect(x - 3.5, y - 4, 1.8, 7);
+    ctx.fillStyle = '#6a4a10';
+    circle(ctx, x, y + 8, 2); ctx.fill();
+  }
+
+  // 정화의 빛: 하얀 별 모양 빛덩이
+  function drawLight(ctx, it, bob) {
+    var x = it.x, y = it.y + bob, pul = 1 + 0.12 * Math.sin(R.time * 8), i;
+    glowAt(ctx, x, y, 56 * pul, 0.8);
+    ctx.beginPath();
+    for (i = 0; i < 8; i++) {
+      var a = i * Math.PI / 4, rr = (i & 1) ? 4 : 10 * pul;
+      var px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = '#f4fbff'; ctx.fill();
+    ctx.lineWidth = 1.2; ctx.strokeStyle = '#7ac8ff'; ctx.stroke();
+  }
+
+  function drawPickups(ctx, l, r, t, b) {
     var items = LW.pickups.items, n = LW.pickups.n;
     for (var i = 0; i < n; i++) {
       var it = items[i];
       if (it.x < l || it.x > r || it.y < t || it.y > b) continue;
-      var boss = it.kind === 1, k = boss ? 1.5 : 1, bob = Math.sin(R.time * 3 + it.x) * 1.5;
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.6;
-      ctx.drawImage(R.glow, it.x - 28 * k, it.y - 28 * k + bob, 56 * k, 56 * k);
-      ctx.globalAlpha = 1;
-      ctx.globalCompositeOperation = 'source-over';
-      var w = 18 * k, h = 13 * k, x = it.x - w / 2, y = it.y - h / 2 + bob;
-      roundRect(ctx, x, y, w, h, 2.5);
-      ctx.fillStyle = boss ? '#6a3a8a' : '#8a5a34'; ctx.fill();
-      ctx.lineWidth = 1.6; ctx.strokeStyle = '#2b1a0e'; ctx.stroke();
-      ctx.fillStyle = boss ? '#4a2866' : '#6e4524';
-      ctx.fillRect(x + 1, y + 1, w - 2, h * 0.35);
-      ctx.fillStyle = '#ffd34d';
-      ctx.fillRect(it.x - 2 * k, y + h * 0.3, 4 * k, 5 * k);
+      // 수명이 5초 남으면 깜빡인다
+      if (it.life > 0 && it.life < 5 && (((it.life * 6) | 0) & 1) === 0) continue;
+      var bob = Math.sin(R.time * 3 + it.x) * 1.5;
+      switch (it.kind) {
+        case 0: case 1: drawChest(ctx, it, bob); break;
+        case 2: drawCandle(ctx, it); break;
+        case 3: drawOil(ctx, it, bob); break;
+        case 4: drawBell(ctx, it, bob); break;
+        case 5: drawLight(ctx, it, bob); break;
+      }
     }
   }
 
@@ -716,7 +793,7 @@
     drawAreas(ctx, l, r, t, b);
     drawChargeLines(ctx, l, r, t, b);
     drawGems(ctx, g, l, r, t, b);
-    drawChests(ctx, l, r, t, b);
+    drawPickups(ctx, l, r, t, b);
     drawEnemies(ctx, g, l, r, t, b);
     drawPlayer(ctx, g);
     drawWeaponFx(ctx, g);
