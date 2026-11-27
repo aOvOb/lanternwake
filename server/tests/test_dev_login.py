@@ -88,6 +88,34 @@ class DevLoginOnInDev(unittest.TestCase):
         self.assertEqual(cfg.client_id, game_api.DEV_CLIENT_ID)
 
 
+class DevLoginSafeguards(unittest.TestCase):
+    def test_dev_with_https_public_origin_exits(self):
+        with mock.patch.dict(os.environ, {"PUBLIC_ORIGIN": "https://example.com"}):
+            cfg = game_api.config_from_env(dev=True)
+        with self.assertRaises(SystemExit):
+            game_api.ensure_dev_safe(cfg)
+
+    def test_dev_with_http_origin_is_fine(self):
+        with mock.patch.dict(os.environ, {"PUBLIC_ORIGIN": "http://localhost:8080"}):
+            game_api.ensure_dev_safe(game_api.config_from_env(dev=True))
+        game_api.ensure_dev_safe(game_api.config_from_env(dev=True))
+
+    def test_production_with_https_origin_is_fine(self):
+        with mock.patch.dict(os.environ, {"PUBLIC_ORIGIN": "https://example.com"}):
+            game_api.ensure_dev_safe(game_api.config_from_env(dev=False))
+
+    def test_serve_dev_with_https_origin_exits_before_listening(self):
+        with mock.patch.dict(os.environ, {"PUBLIC_ORIGIN": "https://example.com"}),                 mock.patch.object(game_api, "App") as app:
+            with self.assertRaises(SystemExit):
+                game_api.cmd_serve(["--dev"])
+        app.assert_not_called()
+
+    def test_dev_default_host_is_loopback_and_explicit_host_wins(self):
+        self.assertEqual(game_api.config_from_env(dev=True).host, "127.0.0.1")
+        self.assertEqual(game_api.config_from_env(dev=True, host="0.0.0.0").host, "0.0.0.0")
+        self.assertEqual(game_api.config_from_env(dev=False).host, "0.0.0.0")
+
+
 class MainShorthand(unittest.TestCase):
     def test_dev_flag_first_means_serve(self):
         calls = []

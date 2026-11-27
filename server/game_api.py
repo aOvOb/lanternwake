@@ -102,6 +102,8 @@ def config_from_env(dev=False, static=None, host=None, port=None):
         cfg.port = port
     if host:
         cfg.host = host
+    elif dev:
+        cfg.host = "127.0.0.1"           # 개발용 로그인은 기본으로 이 컴퓨터에서만 닿는다(--host 로 바꿀 수는 있다)
     if dev:
         cfg.origin = "http://localhost:%d" % cfg.port
         cfg.data = os.path.join(HERE, ".devdata")
@@ -1603,6 +1605,12 @@ def ensure_client_id(cfg):
         cfg.client_id = DEV_CLIENT_ID
 
 
+def ensure_dev_safe(cfg):
+    """--dev 인데 공개 주소(https://)가 설정되어 있으면 운영 설정에 실수로 --dev 가 들어간 것이므로 종료한다."""
+    if cfg.dev and cfg.origin.lower().startswith("https://"):
+        sys.exit("--dev 는 PUBLIC_ORIGIN 이 https:// 인 환경에서 쓸 수 없습니다(개발용 로그인이 공개됩니다).")
+
+
 def cmd_serve(args):
     dev = "--dev" in args
     static = host = port = None
@@ -1621,6 +1629,7 @@ def cmd_serve(args):
         else:
             sys.exit("알 수 없는 인자: " + rest[i])
     cfg = config_from_env(dev=dev, static=static, host=host, port=port)
+    ensure_dev_safe(cfg)
     ensure_client_id(cfg)
     app = App(cfg)
     app.start_janitor()

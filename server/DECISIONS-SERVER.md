@@ -64,5 +64,6 @@ DESIGN-ACCOUNT.md에서 모호했던 부분을 구현하면서 정한 내용이�
 
 - `GET /api/dev/login?name=이름`(이름은 영문, 숫자, `_`, `-` 1~32자, 기본 `tester`)은 `--dev`에서만 동작한다. 이름마다 계정 하나를 만들고(`sub`는 `dev:이름`) 세션 쿠키를 내린 뒤 `303 /?login=ok`로 보낸다. 새 계정 IP 제한(`new_account`)은 걸지 않는다.
 - `--dev`가 아니면 이 경로는 없는 경로와 같은 `404 not_found`이고, 쿠키도 사용자도 만들지 않는다. 환경 변수(`DEV` 등)로 켤 수 없다. `tests/test_dev_login.py`가 보장한다.
+- `--dev`의 기본 host는 `127.0.0.1`이다(`--host`로 바꿀 수 있다). `--dev`이면서 `PUBLIC_ORIGIN`이 `https://`로 시작하면 종료한다(운영 설정에 `--dev`가 잘못 들어가는 것을 막는 이중 방어, 리뷰 3 R7).
 - `serve --dev`는 `GOOGLE_CLIENT_ID`가 없으면 자리표시 값(`DEV_CLIENT_ID`)으로 뜬다. 운영 모드는 그대로 종료한다. `game_api.py --dev`처럼 첫 인자가 `--`로 시작하면 `serve`로 본다.
 
