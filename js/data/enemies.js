@@ -15,8 +15,8 @@
     eye: D('eye', '어스름 눈', 28, 58, 4, 5, 12, 0.2, 'shoot'),
     boar: D('boar', '땅거미 멧돼지', 55, 65, 8, 5, 15, 0.5, 'charge'),
     crow: D('crow', '재까마귀', 6, 190, 4, 2, 9, 0, 'fly', { noReloc: true }),
-    colossus: D('colossus', '잿더미 거인', 2500, 55, 20, 100, 36, 1, 'colossus', { boss: true }),
-    queen: D('queen', '밤나방 여왕', 7000, 70, 22, 100, 32, 1, 'queen', { boss: true }),
+    colossus: D('colossus', '잿더미 거인', 1800, 55, 14, 100, 36, 1, 'colossus', { boss: true }),
+    queen: D('queen', '밤나방 여왕', 12000, 70, 26, 100, 32, 1, 'queen', { boss: true }),
     last: D('last', '마지막 그림자', 18000, 80, 28, 100, 40, 1, 'last', { boss: true })
   };
 })();
