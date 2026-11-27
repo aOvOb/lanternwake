@@ -189,6 +189,7 @@
           // 한 번 더 눌러야 나간다. 나가기 전에 진행 중인 기록을 저장한다.
           if (!confirmTitle) { confirmTitle = true; break; }
           LW.commitProgress(g);
+          LW.account.onRunAbort();
           ui.refreshBest();
         }
         g.setState('TITLE');

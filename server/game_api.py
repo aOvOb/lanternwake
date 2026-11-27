@@ -1361,7 +1361,12 @@ def h_tickets(app, req):
     with app.db.tx() as c:
         unused = c.execute("SELECT COUNT(*) FROM tickets WHERE user_id=? AND used_at IS NULL AND expires_at>?",
                            (uid, now)).fetchone()[0]
-        for _ in range(max(0, min(count, TICKET_MAX_UNUSED - unused))):
+        # 상한을 넘기면 가장 오래된 미사용 표를 지우고 새로 준다(클라이언트가 잃어버린 표가 쌓여 막히지 않게)
+        over = unused + count - TICKET_MAX_UNUSED
+        if over > 0:
+            c.execute("DELETE FROM tickets WHERE id IN (SELECT id FROM tickets WHERE user_id=? AND used_at IS NULL "
+                      "AND expires_at>? ORDER BY issued_at, rowid LIMIT ?)", (uid, now, over))
+        for _ in range(count):
             tid = secrets.token_urlsafe(16)
             c.execute("INSERT INTO tickets(id, user_id, issued_at, expires_at) VALUES(?,?,?,?)",
                       (tid, uid, now, now + TICKET_TTL))

@@ -54,16 +54,52 @@ class TicketTest(RunsBase):
 
     def test_unused_tickets_capped_at_6(self):
         self.assertEqual(len(self.p.tickets(5)), 5)
-        self.assertEqual(len(self.p.tickets(5)), 1)       # 6장까지만
-        self.assertEqual(len(self.p.tickets(1)), 0)
-        self.assertEqual(self.db("SELECT COUNT(*) FROM tickets"), [(6,)])
+        self.assertEqual(len(self.p.tickets(5)), 5)       # 상한에서는 오래된 표를 지우고 새로 준다
+        self.assertEqual(len(self.p.tickets(1)), 1)
+        self.assertEqual(self.db("SELECT COUNT(*) FROM tickets WHERE used_at IS NULL"), [(6,)])
+
+    def test_cap_deletes_oldest_unused_tickets_first(self):
+        first = self.p.tickets(5)
+        self.srv.clock.advance(10)
+        second = self.p.tickets(1)[0]
+        self.srv.clock.advance(10)
+        fresh = self.p.tickets(2)                          # 6 + 2 - 6 = 2장을 지운다
+        left = {r[0] for r in self.db("SELECT id FROM tickets WHERE used_at IS NULL")}
+        self.assertEqual(len(left), 6)
+        self.assertNotIn(first[0]["id"], left)
+        self.assertNotIn(first[1]["id"], left)
+        for t in first[2:] + [second] + fresh:
+            self.assertIn(t["id"], left)
+
+    def test_cap_never_deletes_used_tickets_or_other_users(self):
+        other = Player(self.srv, "other")
+        theirs = other.tickets(5)
+        ts = self.p.tickets(5)
+        self.p.tickets(1)
+        self.srv.clock.advance(400)
+        self.p.submit_ok(make_run(ticket=ts[0]["id"]))     # 하나를 쓴다
+        self.p.tickets(5)                                  # 미사용 5 + 5 - 6 = 4장 삭제
+        self.assertEqual(self.db("SELECT COUNT(*) FROM tickets WHERE used_at IS NOT NULL"), [(1,)])
+        left = {r[0] for r in self.db("SELECT id FROM tickets WHERE user_id=?", (other.id,))}
+        self.assertEqual(left, {t["id"] for t in theirs})
+
+    def test_leaked_tickets_do_not_block_new_ones(self):
+        # 클라이언트가 표를 잃어버려도(서버에는 미사용으로 남음) 다음 요청이 빈 배열을 받지 않는다
+        for _ in range(3):
+            self.p.tickets(2)
+        self.assertEqual(len(self.p.tickets(1)), 1)
+        t = self.p.tickets(1)[0]
+        self.srv.clock.advance(400)
+        self.assertEqual(self.p.submit_ok(make_run(ticket=t["id"]))[0]["status"], "ranked")
 
     def test_used_tickets_free_a_slot(self):
         ts = self.p.tickets(5)
         self.p.tickets(1)
         self.srv.clock.advance(400)
         self.p.submit_ok(make_run(ticket=ts[0]["id"]))
-        self.assertEqual(len(self.p.tickets(5)), 1)
+        self.p.tickets(1)                                  # 빈 자리가 있어 지우는 표가 없다
+        self.assertEqual(self.db("SELECT COUNT(*) FROM tickets WHERE used_at IS NULL"), [(6,)])
+        self.assertEqual(self.db("SELECT COUNT(*) FROM tickets"), [(7,)])
 
     def test_expired_tickets_do_not_count(self):
         self.p.tickets(5)

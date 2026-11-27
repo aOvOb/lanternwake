@@ -49,7 +49,11 @@ function makeEnv() {
     }
     if (p === 'runs/tickets') {
       const out = [];
-      for (let i = 0; i < body.count; i++) out.push({ id: 'T' + (++srv.ticketSeq), issuedAt: 1, expiresAt: 4102444800 });
+      for (let i = 0; i < body.count; i++) {
+        const id = 'T' + (++srv.ticketSeq);
+        if (srv.cap) { while (srv.cap.length >= 6) srv.cap.shift(); srv.cap.push(id); }
+        out.push({ id, issuedAt: 1, expiresAt: 4102444800 });
+      }
       return reply(200, { tickets: out });
     }
     if (p === 'runs') {
@@ -238,6 +242,50 @@ async function test(name, fn) {
     const queue = JSON.parse(store['lanternwake.v1.queue']);
     assert.strictEqual(queue.length, 50);
     assert.strictEqual(queue[0].run.timeMs, 36000, '가장 오래된 5개가 버려진다');
+  });
+
+  await test('타이틀로 3번 나간 뒤에도 표가 남고 다음 판이 표를 단다', async () => {
+    const { LW, srv } = await loggedIn();
+    const A = LW.account;
+    const before = A.ticketCount();
+    for (let i = 0; i < 3; i++) {
+      A.onRunStart(); await settle();                // 표 예약과 새 표 도착
+      A.onRunAbort();                                // 일시정지에서 타이틀로
+    }
+    assert.ok(A.ticketCount() >= before, '표가 줄지 않는다: ' + A.ticketCount());
+    srv.up = false; LW.net.up = false;
+    A.onRunStart(); A.onRunEnd(fakeGame({ time: 40, kills: 3, level: 2 }));
+    srv.up = true; srv.log.length = 0;
+    await A.onOnline(); await settle();
+    assert.ok(srv.log.filter((l) => l.path === 'runs')[0].body.runs[0].ticket, '다음 판에 표가 붙어야 한다');
+  });
+
+  await test('새 판을 시작할 때 이전 판이 끝나지 않았으면 그 판의 표를 풀로 돌려놓는다', async () => {
+    const { LW } = await loggedIn();
+    const A = LW.account;
+    for (let i = 0; i < 4; i++) { A.onRunStart(); await settle(); }   // onRunEnd 도 onRunAbort 도 없이 새 판
+    assert.ok(A.ticketCount() >= 5, '표가 줄지 않는다: ' + A.ticketCount());
+  });
+
+  await test('타이틀로 나가기를 반복해도 서버 상한(6장, 오래된 표 삭제)에서 들고 있는 표가 지워지지 않는다', async () => {
+    const env = makeEnv();
+    env.srv.cap = [];                                  // 켜면 가짜 서버가 미사용 표를 6장까지만 두고 오래된 것부터 지운다
+    await env.LW.account.init(); await env.LW.net.health(); await env.LW.account.onOnline(); await settle();
+    const { LW, srv } = env, A = LW.account;
+    for (let i = 0; i < 10; i++) { A.onRunStart(); await settle(); A.onRunAbort(); }
+    const held = LW.storage.loadTickets().map((t) => t.id);
+    assert.ok(held.length >= 5, '표 ' + held.length + '장');
+    for (const id of held) assert.ok(srv.cap.indexOf(id) >= 0, id + ' 가 서버에서 지워졌다');
+  });
+
+  await test('30초 미만 판은 표를 붙이지 않고 풀로 돌려놓는다', async () => {
+    const { LW, srv } = await loggedIn();
+    const A = LW.account;
+    A.onRunStart(); await settle();
+    A.onRunEnd(fakeGame({ time: 12, kills: 1, level: 1 })); await settle();
+    const posted = srv.log.filter((l) => l.path === 'runs').pop().body.runs[0];
+    assert.strictEqual(posted.ticket, null);
+    assert.strictEqual(A.ticketCount(), 6, '예약한 표와 새 표가 모두 풀로 돌아온다');
   });
 
   await test('게스트: 서버를 부르지 않고 안내 줄만 남긴다', async () => {

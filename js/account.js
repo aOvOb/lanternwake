@@ -221,6 +221,12 @@
     return out;
   }
   function pool(t) { if (t) { tickets.push(t); LW.storage.saveTickets(tickets); } }
+  // 이 판이 들고 있던 표(예약, 새로 받은 것)를 풀로 돌려놓는다. 끝나지 않은 판을 버릴 때 쓴다.
+  function releaseRun() {
+    var a = reserved, b = fresh;
+    reserved = null; fresh = null;
+    pool(a); pool(b);
+  }
   function toTicket(uid, o) { return { uid: uid, id: o.id, issuedAt: o.issuedAt, expiresAt: o.expiresAt }; }
 
   // 미리 받은 표를 LW.TICKET_POOL 장까지 채운다(로그인, 온라인, TITLE 일 때). 만료된 표는 버린다.
@@ -245,22 +251,31 @@
   // 판 시작: 미리 받은 표 하나를 예약하고, 새 표를 요청한다(3초 제한, 기다리지 않는다)
   A.onRunStart = function () {
     var seq = ++runSeq, uid = A.uid;
-    reserved = null; fresh = null;
+    releaseRun();                    // 이전 판이 끝나지 않았다면(타이틀로 나감, 앱 재개) 그 판의 표를 돌려놓는다
     A.resultLine = ''; A.lastRunId = ''; A.lastStatus = '';
     if (!A.enabled || !A.loggedIn) return;
     var list = validTickets();
+    // 끝나지 않은 판의 표가 돌아와 풀이 넘치면 가장 최근 표를 쓰고 새 표는 요청하지 않는다.
+    // 서버는 미사용 표가 6장을 넘으면 가장 오래된 표를 지우므로, 풀을 넘겨 요청하면 들고 있는 표가 지워진다.
+    var over = list.length > LW.TICKET_POOL;
     if (list.length) {
-      reserved = list[0];
+      reserved = over ? list[list.length - 1] : list[0];
       tickets.splice(tickets.indexOf(reserved), 1);
       LW.storage.saveTickets(tickets);
     }
-    if (!net.up) return;
+    if (!net.up || over) return;
     net.post('runs/tickets', { count: 1 }, 3000).then(function (r) {
       if (!(r.ok && r.data && r.data.tickets && r.data.tickets[0])) return;
       var t = toTicket(uid, r.data.tickets[0]);
       if (seq === runSeq && A.uid === uid) fresh = t;     // 판이 아직 진행 중이면 이 판이 쓴다
       else if (A.uid === uid) pool(t);                    // 늦게 도착했으면 다음 판을 위해 넣어 둔다
     });
+  };
+
+  // 끝나지 않은 판을 버린다(일시정지에서 타이틀로). 표는 풀로 돌아가고 늦게 오는 새 표도 풀로 간다.
+  A.onRunAbort = function () {
+    runSeq++;
+    releaseRun();
   };
 
   // ===== 판 요약과 제출 =====
@@ -298,7 +313,7 @@
     var s = buildSummary(g);
     var t = fresh || reserved;
     if (fresh && reserved) pool(reserved);       // 새 표가 도착했으면 그것을 쓰고 미리 받은 표는 돌려놓는다
-    else if (!fresh && reserved) { /* 예약한 표를 쓴다 */ }
+    if (s.timeMs < 30000) { pool(t); t = null; }   // 30초 미만 판은 서버가 표를 쓰지 않으므로 붙이지 않고 돌려놓는다
     s.ticket = t ? t.id : null;
     reserved = null; fresh = null;
     queue.push({ uid: A.uid, run: s });

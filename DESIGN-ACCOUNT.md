@@ -163,7 +163,7 @@ RS256 서명 검증은 RFC 8017 8.2.2의 "인코딩해서 통째로 비교" 방�
 | `PUT /api/me/settings` | O | `{ "settings": {...}, "rev": 1764100123456 }` | `{ "settings": {...}, "rev": <저장된 rev> }`. 받은 rev가 저장된 rev보다 클 때만 덮어쓴다 |
 | `POST /api/me/import` | O | `{ "records": { "bestTime": 412.5, "bestKills": 980, "bestLevel": 31, "wins": 0, "runs": 14, "fullDawns": 0 } }` | `{ "records": {...합친 결과...} }`. 계정당 1회(`imported` 표시). 두 번째부터 409 `already_imported` |
 | `DELETE /api/me` | O | `{ "confirm": "DELETE" }` | `{ "ok": true }`. 사용자와 관련 행 전부 삭제, 쿠키 삭제 |
-| `POST /api/runs/tickets` | O | `{ "count": 1 }` (1~5) | `{ "tickets": [ { "id": "b64url 22자", "issuedAt": 1764100000, "expiresAt": 1765309600 } ] }`. 미사용 표가 6장을 넘으면 넘는 만큼 덜 준다 |
+| `POST /api/runs/tickets` | O | `{ "count": 1 }` (1~5) | `{ "tickets": [ { "id": "b64url 22자", "issuedAt": 1764100000, "expiresAt": 1765309600 } ] }`. 미사용 표가 6장을 넘으면 넘는 만큼 가장 오래된 미사용 표를 지우고 준다 |
 | `POST /api/runs` | O | `{ "runs": [ RunSummary, ... ] }` (최대 20개) | `{ "results": [ { "clientRunId": "...", "status": "ranked", "rank": { "time": 14, "kills": 3 } } ], "records": {...} }` |
 | `GET /api/leaderboard?board=time\|kills&limit=50` | X | 없음 | `{ "board": "time", "updatedAt": 1764100000, "entries": [ { "rank": 1, "nickname": "오렌", "timeMs": 900000, "kills": 4120, "level": 52, "fullDawn": true, "at": 1764000000 } ], "me": { "rank": 37, "timeMs": 512300, "kills": 1500 } }`. `me`는 로그인했고 기록이 있을 때만. 서버가 보드별로 30초 캐시 |
 
