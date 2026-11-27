@@ -139,6 +139,8 @@
       toGuest();
       return true;
     });
+      // 서버 세션이 살아 있는데 로컬만 게스트로 바꾸면 다음 실행 때 다시 로그인되므로, 성공(또는 이미 세션 없음)일 때만 바꾼다
+      if (!r.ok && r.status !== 401) { say('로그아웃하지 못했어요. 다시 시도해 주세요'); return false; }
   };
 
   A.deleteAccount = function () {
