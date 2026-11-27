@@ -8,15 +8,15 @@
     W(3, 4, { moth: 30, mudling: 40, spore: 30 }, 1.2, 12),
     W(4, 5, { mite: 20, mudling: 30, spore: 20, rusthelm: 30 }, 1.4, 15),
     W(5, 6, { moth: 40, spore: 20, rusthelm: 40 }, 1.3, 14),
-    W(6, 7, { moth: 30, rusthelm: 30, eye: 20, boar: 20 }, 5, 75),
-    W(7, 8, { mudling: 25, spore: 20, eye: 25, boar: 30 }, 6, 95),
-    W(8, 9, { mite: 20, rusthelm: 30, eye: 30, boar: 20 }, 7, 115),
-    W(9, 10, { mite: 15, moth: 15, mudling: 15, spore: 15, rusthelm: 15, eye: 15, boar: 10 }, 8, 140),
-    W(10, 11, { moth: 50, eye: 30, boar: 20 }, 6, 110),
-    W(11, 12, { spore: 20, rusthelm: 30, eye: 20, boar: 30 }, 9, 170),
-    W(12, 13, { mite: 30, mudling: 20, rusthelm: 25, boar: 25 }, 10, 200),
-    W(13, 14, { moth: 20, spore: 20, rusthelm: 20, eye: 20, boar: 20 }, 11, 230),
-    W(14, 15, { moth: 30, rusthelm: 35, boar: 35 }, 10, 210)
+    W(6, 7, { moth: 30, rusthelm: 30, eye: 20, boar: 20 }, 2, 30),
+    W(7, 8, { mudling: 25, spore: 20, eye: 25, boar: 30 }, 2.3, 40),
+    W(8, 9, { mite: 20, rusthelm: 30, eye: 30, boar: 20 }, 2.7, 52),
+    W(9, 10, { mite: 15, moth: 15, mudling: 15, spore: 15, rusthelm: 15, eye: 15, boar: 10 }, 3.6, 68),
+    W(10, 11, { moth: 50, eye: 30, boar: 20 }, 5, 90),
+    W(11, 12, { spore: 20, rusthelm: 30, eye: 20, boar: 30 }, 7, 125),
+    W(12, 13, { mite: 30, mudling: 20, rusthelm: 25, boar: 25 }, 8.4, 150),
+    W(13, 14, { moth: 20, spore: 20, rusthelm: 20, eye: 20, boar: 20 }, 9.4, 170),
+    W(14, 15, { moth: 30, rusthelm: 35, boar: 35 }, 8.4, 150)
   ];
 
   // type: elite(enemy, n), swarm(n, 까마귀 떼), ring(n, 진드기 포위), boss(id)
