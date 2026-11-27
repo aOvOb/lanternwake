@@ -9,7 +9,9 @@
 #   3. 서버 코드를 /srv/stack/game/ 에 두기
 #   4. compose에 game 서비스가 없으면 그 블록만 덧붙이고, game 컨테이너 올리기
 #   5. Caddyfile에 game 사이트가 없으면 그 블록만 덧붙이고, 검사한 뒤 reload
-#   6. https://game.aovob7.duckdns.org/api/health 확인
+#   6. 게임 백업이 들어 있는 owl-backup을 /usr/local/sbin/owl-backup 에 설치하고 한 번 실행(실패해도 설치는 성공으로 둔다)
+#   7. 이 서버 안에서 Caddy(127.0.0.1:443)로 https://game.aovob7.duckdns.org/api/health 확인
+#   8. 마지막에 journalctl -u owl-backup -n 30 출력(기존 백업 실패 원인 확인용)
 #
 # 이미 있는 비밀값(pepper)과 구글 클라이언트 ID는 건드리지 않는다. 다른 OwL 서비스는 멈추거나 다시 만들지 않는다.
 #
@@ -33,7 +35,14 @@ CADDYFILE=$STACK/Caddyfile
 BACKUPS=$STACK/backup-game
 GAME_UID=10001   # docker-compose.yml의 game.user, ops/owl-backup의 GAME_UID와 같은 값
 DOMAIN=game.aovob7.duckdns.org
-HEALTH_URL=${HEALTH_URL:-https://$DOMAIN/api/health}
+# 서버가 자기 공인 IP로 나갔다 돌아오지 않도록(헤어핀), 기본 주소는 도메인을 127.0.0.1로 풀어 Caddy에 바로 접속한다.
+# HEALTH_URL을 덮어쓰는 시험 모드에서는 --resolve를 쓰지 않는다.
+if [ -n "${HEALTH_URL:-}" ]; then
+  CURL_RESOLVE=()
+else
+  HEALTH_URL=https://$DOMAIN/api/health
+  CURL_RESOLVE=(--resolve "$DOMAIN:443:127.0.0.1")
+fi
 HEALTH_SLEEP=${HEALTH_SLEEP:-5}
 KEEP=3
 PLACEHOLDER_ID=not-set-yet
@@ -43,6 +52,19 @@ die() { printf '오류: %s\n' "$*" >&2; exit 1; }
 dc() { docker compose -f "$COMPOSE" "$@"; }
 # 가짜 루트(PREFIX)로 시험할 때는 소유자를 바꾸지 않는다.
 own() { if [ -z "$PREFIX" ]; then chown "$@"; fi; }
+
+# 중간에 실패해도 임시 파일이 남지 않게 한다.
+TMPFILES=()
+cleanup() { if [ "${#TMPFILES[@]}" -gt 0 ]; then rm -f -- "${TMPFILES[@]}"; fi; }
+trap cleanup EXIT
+
+# 기존 백업 실패 원인을 바로 볼 수 있게 owl-backup의 최근 로그를 출력한다.
+backup_journal() {
+  if command -v journalctl > /dev/null; then
+    say "journalctl -u owl-backup -n 30 --no-pager"
+    journalctl -u owl-backup -n 30 --no-pager || true
+  fi
+}
 
 usage() { awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$SELF"; }
 
@@ -126,6 +148,7 @@ fi
 ENV_CHANGED=0
 if [ "$NEW_ID" != "$CURRENT_ID" ]; then
   tmp=$(mktemp "$ENVF.XXXXXX")
+  TMPFILES+=("$tmp")
   if [ -f "$ENVF" ]; then
     grep -v '^GOOGLE_CLIENT_ID=' "$ENVF" > "$tmp" || true
   fi
@@ -217,6 +240,7 @@ if [ "$FULL" = 1 ]; then
     mkdir -p "$BACKUPS/$stamp"
     cp -a "$COMPOSE" "$BACKUPS/$stamp/docker-compose.yml"
     new=$COMPOSE.new
+    TMPFILES+=("$new")
     # services 아래 마지막 서비스 뒤(다음 최상위 키 앞)에 game 블록을 끼운다. 다른 줄은 그대로다.
     awk -v blockfile="$HERE/stack/game.compose.yml" '
       function emit(   l) { while ((getline l < blockfile) > 0) print l; close(blockfile); done = 1 }
@@ -260,6 +284,7 @@ if [ "$FULL" = 1 ]; then
     mkdir -p "$BACKUPS/$stamp"
     cp -a "$CADDYFILE" "$BACKUPS/$stamp/Caddyfile"
     new=$(mktemp "$CADDYFILE.XXXXXX")
+    TMPFILES+=("$new")
     cat "$CADDYFILE" > "$new"
     if [ -n "$(tail -c 1 "$new")" ]; then echo >> "$new"; fi
     echo >> "$new"
@@ -276,7 +301,43 @@ if [ "$FULL" = 1 ]; then
     fi
     die "Caddyfile 검사 실패(이번 실행에서 바꾼 것은 없음): $check_out"
   fi
-  dc exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+  # reload가 실패하면 Caddy는 옛 설정으로 계속 돌지만, 디스크에 남은 새 블록은 재시작 때 읽힌다. 이번에 만든 백업으로 되돌린다.
+  if ! reload_out=$(dc exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>&1); then
+    if [ -f "$BACKUPS/$stamp/Caddyfile" ]; then
+      cat "$BACKUPS/$stamp/Caddyfile" > "$CADDYFILE"
+      die "Caddy reload 실패, Caddyfile을 원래 내용으로 되돌렸습니다: $reload_out"
+    fi
+    die "Caddy reload 실패(이번 실행에서 바꾼 Caddyfile은 없음): $reload_out"
+  fi
+
+  # ---------------------------------------------------------------- 게임 백업 스크립트
+  say "백업(owl-backup)"
+  if [ -f "$HERE/stack/owl-backup" ]; then
+    backup_bin=$PREFIX/usr/local/sbin/owl-backup
+    if cmp -s "$HERE/stack/owl-backup" "$backup_bin"; then
+      echo "owl-backup 변경 없음"
+    else
+      install -d -m 755 "$(dirname "$backup_bin")"
+      install -m 755 "$HERE/stack/owl-backup" "$backup_bin.new"
+      mv -f "$backup_bin.new" "$backup_bin"
+      echo "owl-backup을 $backup_bin 에 설치했습니다(game.db와 pepper 포함)."
+    fi
+    # 백업이 실패해도 게임 설치는 성공으로 둔다. 원인은 마지막에 출력하는 journal로 본다.
+    if command -v systemctl > /dev/null; then
+      if systemctl start owl-backup; then
+        echo "systemctl start owl-backup 성공"
+      else
+        echo "경고: systemctl start owl-backup 실패. 게임 설치는 계속합니다." >&2
+        BACKUP_WARN=1
+      fi
+    else
+      echo "경고: systemctl이 없어 백업을 실행하지 못했습니다." >&2
+      BACKUP_WARN=1
+    fi
+  else
+    echo "경고: 묶음에 owl-backup이 없어 게임 백업이 설치되지 않았습니다. OwL-server 레포를 찾아 deploy.sh를 다시 돌리세요." >&2
+    BACKUP_WARN=1
+  fi
 fi
 
 # ---------------------------------------------------------------- 6. 헬스 체크
@@ -284,7 +345,7 @@ say "헬스 체크 $HEALTH_URL"
 # 처음에는 Caddy가 새 도메인의 인증서를 받는 데 1~2분 걸릴 수 있어 최대 2분 기다린다.
 ok=0
 for _ in $(seq 1 24); do
-  if body=$(curl -fsS --max-time 10 "$HEALTH_URL" 2> /dev/null) && [[ $body == *'"ok":true'* ]]; then
+  if body=$(curl -fsS --max-time 10 "${CURL_RESOLVE[@]}" "$HEALTH_URL" 2> /dev/null) && [[ $body == *'"ok":true'* ]]; then
     ok=1
     break
   fi
@@ -293,13 +354,18 @@ done
 if [ "$ok" != 1 ]; then
   echo "헬스 체크 실패. 컨테이너 로그:" >&2
   dc logs --tail 20 game >&2 || true
+  if [ "$FULL" = 1 ]; then backup_journal; fi
   die "https://$DOMAIN 이 응답하지 않습니다. 인증서 발급이 늦을 수 있으니 잠시 뒤 같은 명령을 다시 실행해도 됩니다."
 fi
 echo "응답: $body"
 
 say "완료"
 if [ "$FULL" = 1 ]; then echo "버전 ${VER:-?} -> releases/${REL:-?}"; fi
+if [ "${BACKUP_WARN:-0}" = 1 ]; then
+  echo "경고: 백업이 성공하지 않았습니다. 게임 설치는 끝났습니다. 아래 journal에서 원인을 확인하세요."
+fi
 if [ "$NEW_ID" = "$PLACEHOLDER_ID" ]; then
   echo "구글 로그인은 아직 안 됩니다. 클라이언트 ID를 받으면:"
   echo "  sudo bash /srv/stack/game/install-game.sh --client-id <ID>.apps.googleusercontent.com"
 fi
+if [ "$FULL" = 1 ]; then backup_journal; fi

@@ -10,11 +10,12 @@
 #   static/              index.html, manifest.webmanifest, sw.js, js/, icons/
 #   server/              game_api.py, bounds.json
 #   stack/               OwL-server 레포의 game 서비스 블록과 Caddy 사이트 블록(서버에 없을 때만 쓰임)
+#   stack/owl-backup     OwL-server 레포의 ops/owl-backup(game.db와 pepper 백업 포함). 설치 때 항상 /usr/local/sbin/owl-backup 에 둔다
 #   BUILD-INFO           만든 시각과 커밋(참고용)
 #
 # 환경 변수
 #   OWL_SERVER_DIR       OwL-server 레포 위치(기본: 이 저장소 옆 ../Owl-player/OwL-server)
-#   NO_STACK=1           stack/ 을 넣지 않는다(서버의 compose와 Caddyfile에 game이 이미 있을 때)
+#   NO_STACK=1           game 서비스 블록과 Caddy 블록을 넣지 않는다(서버의 compose와 Caddyfile에 game이 이미 있을 때). owl-backup은 있으면 넣는다
 #   SKIP_RELEASE_CHECK=1 sw.js 버전과 목록 검사를 건너뛴다(시험용)
 set -euo pipefail
 
@@ -64,8 +65,19 @@ SHA=$( (cd "$STAGE/static" && find . -type f | LC_ALL=C sort | xargs sha256sum) 
 printf '%s\n' "$SHA" > "$STAGE/static.sha256"
 
 # ---------------------------------------------------------------- OwL-server의 game 블록
+# 게임 백업이 들어 있는 owl-backup. NO_STACK여도 넣는다(백업은 compose와 별개로 서버에 있어야 한다).
+if [ -f "$OWL_SERVER_DIR/ops/owl-backup" ]; then
+  tr -d '\r' < "$OWL_SERVER_DIR/ops/owl-backup" > "$STAGE/stack/owl-backup"
+  chmod 755 "$STAGE/stack/owl-backup"
+  bash -n "$STAGE/stack/owl-backup" || die "OwL-server의 ops/owl-backup 문법이 올바르지 않습니다."
+  grep -q 'game-data/pepper' "$STAGE/stack/owl-backup" && grep -q 'game.db' "$STAGE/stack/owl-backup" \
+    || die "OwL-server의 ops/owl-backup에 게임 백업이 없습니다. OwL-server를 최신으로 받으세요."
+elif [ "${NO_STACK:-0}" != 1 ]; then
+  die "OwL-server 레포에서 ops/owl-backup을 찾지 못했습니다: $OWL_SERVER_DIR (OWL_SERVER_DIR로 알려 주세요)"
+fi
+
 if [ "${NO_STACK:-0}" = 1 ]; then
-  rmdir "$STAGE/stack"
+  :
 else
   [ -f "$OWL_SERVER_DIR/docker-compose.yml" ] && [ -f "$OWL_SERVER_DIR/Caddyfile" ] \
     || die "OwL-server 레포를 찾지 못했습니다: $OWL_SERVER_DIR (OWL_SERVER_DIR로 알려 주세요. 서버에 이미 game 설정이 있으면 NO_STACK=1)"
@@ -86,6 +98,9 @@ else
   grep -q '^game\.aovob7\.duckdns\.org {' "$STAGE/stack/game.Caddyfile" && [ "$(tail -n 1 "$STAGE/stack/game.Caddyfile")" = "}" ] \
     || die "OwL-server의 Caddyfile에서 game 사이트를 찾지 못했습니다. OwL-server를 최신으로 받으세요."
 fi
+
+# NO_STACK이고 owl-backup도 없으면 빈 stack/ 폴더는 지운다.
+rmdir "$STAGE/stack" 2> /dev/null || true
 
 game_rev=$(git rev-parse --short HEAD 2> /dev/null || echo unknown)
 owl_rev=unknown

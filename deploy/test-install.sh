@@ -14,8 +14,10 @@ trap 'rm -rf "$T"' EXIT
 FAKE=$T/root
 STUBS=$T/stubs
 LOG=$T/docker.log
+SYSLOG=$T/system.log  # systemctl, journalctl, curl 호출 기록
 mkdir -p "$FAKE/srv/stack" "$STUBS" "$T/bundles"
 : > "$LOG"
+: > "$SYSLOG"
 
 pass=0
 fail=0
@@ -51,22 +53,36 @@ EOF
 printf '{\n\tlog default {\n\t\tlevel WARN\n\t}\n}\n\naovob7.duckdns.org {\n\trespond "aovob7 home" 200\n}' > "$FAKE/srv/stack/Caddyfile"  # 끝 줄바꿈 없음
 
 # 가짜 docker: 인자를 기록한다. ps -q game은 $T/running 파일이 있을 때만 값을 낸다.
-# FAIL_VALIDATE 파일이 있으면 caddy validate가 실패한다.
+# FAIL_VALIDATE, FAIL_RELOAD 파일이 있으면 caddy validate, caddy reload가 실패한다.
 cat > "$STUBS/docker" <<EOF
 #!/usr/bin/env bash
 echo "docker \$*" >> "$LOG"
 case "\$*" in
   *"ps -q game"*) [ -f "$T/running" ] && echo abc123 ;;
   *"caddy validate"*) [ -f "$T/FAIL_VALIDATE" ] && { echo "bad caddyfile" >&2; exit 1; } ;;
+  *"caddy reload"*) [ -f "$T/FAIL_RELOAD" ] && { echo "reload refused" >&2; exit 1; } ;;
   *"up -d"*) touch "$T/running" ;;
 esac
 exit 0
 EOF
-cat > "$STUBS/curl" <<'EOF'
+cat > "$STUBS/curl" <<EOF
 #!/usr/bin/env bash
+echo "curl \$*" >> "$SYSLOG"
 echo '{"ok":true,"version":"1.0.0"}'
 EOF
-chmod +x "$STUBS/docker" "$STUBS/curl"
+# 가짜 systemctl, journalctl: 호출을 기록한다. FAIL_BACKUP 파일이 있으면 systemctl start가 실패한다.
+cat > "$STUBS/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "systemctl \$*" >> "$SYSLOG"
+[ -f "$T/FAIL_BACKUP" ] && { echo "Job for owl-backup.service failed" >&2; exit 1; }
+exit 0
+EOF
+cat > "$STUBS/journalctl" <<EOF
+#!/usr/bin/env bash
+echo "journalctl \$*" >> "$SYSLOG"
+echo "JOURNAL-LINE owl-backup: sample"
+EOF
+chmod +x "$STUBS/docker" "$STUBS/curl" "$STUBS/systemctl" "$STUBS/journalctl"
 # Git Bash의 mv -T는 .lnk 방식 링크의 이름을 망가뜨린다. 시험에서만 링크 교체를 흉내 낸다(실서버는 GNU mv -T의 rename).
 case $(uname -s) in
   MINGW* | MSYS*)
@@ -112,6 +128,15 @@ B0=$T/bundles/b0
 mkdir "$B0"
 tar -xzf "$ROOT/deploy/dist/lanternwake-game.tar.gz" -C "$B0"
 check "묶음에 필요한 파일이 있다" bash -c "cd '$B0' && test -f install-game.sh && test -f VERSION && test -f static/index.html && test -f static/sw.js && test -f server/game_api.py && test -f stack/game.compose.yml && test -f stack/game.Caddyfile"
+check "묶음에 게임 백업이 든 owl-backup이 있다" bash -c "cd '$B0' && test -x stack/owl-backup && grep -q 'game-data/pepper' stack/owl-backup && grep -q 'game.db' stack/owl-backup"
+check "compose 블록에 컨테이너 격리 설정이 있다" bash -c "cd '$B0' && grep -q 'read_only: true' stack/game.compose.yml && grep -q 'cap_drop' stack/game.compose.yml && grep -q 'no-new-privileges' stack/game.compose.yml && grep -q 'pids_limit' stack/game.compose.yml && grep -q 'cpus:' stack/game.compose.yml"
+# NO_STACK여도 owl-backup은 들어가고, 서비스와 Caddy 블록은 빠진다. 시험 뒤 기본 묶음을 다시 만든다.
+NS=$T/bundles/nostack
+mkdir "$NS"
+SKIP_RELEASE_CHECK=1 NO_STACK=1 bash "$ROOT/tools/deploy.sh" > /dev/null
+tar -xzf "$ROOT/deploy/dist/lanternwake-game.tar.gz" -C "$NS"
+check "NO_STACK 묶음에도 owl-backup이 있고 compose, Caddy 블록은 없다" bash -c "cd '$NS' && test -f stack/owl-backup && test ! -e stack/game.compose.yml && test ! -e stack/game.Caddyfile"
+SKIP_RELEASE_CHECK=1 bash "$ROOT/tools/deploy.sh" > /dev/null
 VER=$(tr -d '\r\n' < "$B0/VERSION")
 
 make_bundle() { # 이름, 버전, 정적 파일에 더할 내용(비면 그대로)
@@ -141,10 +166,16 @@ check "Caddyfile의 기존 사이트가 남았다" grep -q 'respond "aovob7 home
 check "원본 백업이 있다" bash -c "ls '$S'/backup-game/*/docker-compose.yml '$S'/backup-game/*/Caddyfile"
 check "caddy validate 후 reload를 불렀다" bash -c "grep -n 'caddy validate' '$LOG' | head -1 | cut -d: -f1 | xargs -I{} sh -c 'tail -n +{} \"$LOG\" | grep -q \"caddy reload\"'"
 check "up -d game을 불렀다" grep -q 'up -d game' "$LOG"
+check "owl-backup이 /usr/local/sbin 에 실행 가능하게 설치됐다" bash -c "test -x '$FAKE/usr/local/sbin/owl-backup' && grep -q 'game.db' '$FAKE/usr/local/sbin/owl-backup'"
+check "systemctl start owl-backup을 불렀다" grep -qx 'systemctl start owl-backup' "$SYSLOG"
+check "journalctl -u owl-backup -n 30 --no-pager 출력이 맨 끝에 있다" bash -c "tail -n 1 '$T/run1.out' | grep -q 'JOURNAL-LINE' && grep -qx 'journalctl -u owl-backup -n 30 --no-pager' '$SYSLOG'"
+check "헬스 체크는 --resolve 로 127.0.0.1에 접속한다" grep -q -e '--resolve game.aovob7.duckdns.org:443:127.0.0.1 https://game.aovob7.duckdns.org/api/health' "$SYSLOG"
+check "임시 파일이 남지 않았다" bash -c "! ls '$S'/Caddyfile.* '$S'/docker-compose.yml.new '$S'/game.env.* 2> /dev/null"
 check "다른 서비스를 건드리는 명령이 없다(down, stop, rm, restart caddy)" bash -c "! grep -E 'compose.* (down|stop|rm|kill)( |$)|restart caddy|up -d$' '$LOG'"
 
 PEPPER1=$(sha256sum < "$S/game-data/pepper")
 SNAP1=$(snapshot)
+cp -a "$FAKE/usr/local/sbin/owl-backup" "$T/owl-backup.first"
 
 # ---------------------------------------------------------------- 2회차(멱등)
 echo "[2회차 같은 묶음 다시 실행]"
@@ -156,6 +187,8 @@ check "스냅샷이 비어 있지 않다" test "$(echo "$SNAP1" | wc -l)" -gt 20
 check "파일 트리와 내용이 1회차와 같다" test "$SNAP1" = "$SNAP2"
 check "pepper가 그대로다" test "$PEPPER1" = "$(sha256sum < "$S/game-data/pepper")"
 check "2회차에는 compose, Caddyfile을 다시 바꾸지 않았다" bash -c "! grep -q 'compose에 game 서비스를 덧붙' '$T/run2.out' && ! grep -q 'Caddyfile에 .* 사이트를 덧붙' '$T/run2.out'"
+check "2회차에도 owl-backup은 같은 내용이다" cmp -s "$T/owl-backup.first" "$FAKE/usr/local/sbin/owl-backup"
+check "2회차에는 owl-backup을 다시 설치하지 않았다" grep -q 'owl-backup 변경 없음' "$T/run2.out"
 check "2회차에는 컨테이너를 다시 만들지 않았다" bash -c "! grep -q 'force-recreate\|restart game' '$LOG'"
 
 # ---------------------------------------------------------------- --client-id
@@ -213,6 +246,54 @@ check "검사 실패면 종료 코드가 0이 아니다" test "$rc" -ne 0
 check "Caddyfile이 원래 내용으로 돌아갔다" test "$BEFORE" = "$(sha256sum < "$S/Caddyfile")"
 run "$B0" > /dev/null
 check "검사가 통과하면 다음 실행에서 붙는다" grep -q '^game\.aovob7\.duckdns\.org {' "$S/Caddyfile"
+
+echo "[Caddy reload 실패]"
+cat > "$FAKE/srv/stack/Caddyfile" <<'EOF'
+aovob7.duckdns.org {
+	respond "aovob7 home" 200
+}
+EOF
+BEFORE=$(sha256sum < "$S/Caddyfile")
+touch "$T/FAIL_RELOAD"
+set +e
+run "$B0" > "$T/run7.out" 2>&1
+rc=$?
+set -e
+rm -f "$T/FAIL_RELOAD"
+check "reload 실패면 종료 코드가 0이 아니다" test "$rc" -ne 0
+check "reload 실패 시 Caddyfile이 원래 내용으로 돌아갔다" test "$BEFORE" = "$(sha256sum < "$S/Caddyfile")"
+check "reload 실패 메시지가 나온다" grep -q 'Caddy reload 실패, Caddyfile을 원래 내용으로 되돌렸습니다' "$T/run7.out"
+check "reload 실패 뒤에도 임시 파일이 남지 않았다" bash -c "! ls '$S'/Caddyfile.* 2> /dev/null"
+run "$B0" > /dev/null
+check "reload가 통과하면 다음 실행에서 붙는다" grep -q '^game\.aovob7\.duckdns\.org {' "$S/Caddyfile"
+
+echo "[백업 실패는 설치 실패가 아니다]"
+: > "$SYSLOG"
+touch "$T/FAIL_BACKUP"
+set +e
+run "$B0" > "$T/run8.out" 2>&1
+rc=$?
+set -e
+rm -f "$T/FAIL_BACKUP"
+check "systemctl start가 실패해도 종료 코드는 0이다" test "$rc" -eq 0
+check "경고가 나온다" grep -q '경고: systemctl start owl-backup 실패' "$T/run8.out"
+check "실패해도 journal을 맨 끝에 출력한다" bash -c "tail -n 1 '$T/run8.out' | grep -q 'JOURNAL-LINE'"
+check "실패해도 헬스 체크까지 끝났다" grep -q '응답: ' "$T/run8.out"
+
+echo "[HEALTH_URL을 덮어쓰면 --resolve를 쓰지 않는다]"
+: > "$SYSLOG"
+PATH="$STUBS:$PATH" PREFIX="$FAKE" HEALTH_SLEEP=0 HEALTH_URL=http://localhost:9/api/health bash "$B0/install-game.sh" > "$T/run9.out"
+check "curl 인자에 --resolve 가 없다" bash -c "grep -q 'curl .*http://localhost:9/api/health' '$SYSLOG' && ! grep -q -e '--resolve' '$SYSLOG'"
+
+echo "[묶음에 owl-backup이 없으면 경고만 한다]"
+make_bundle nobk 9.1.0 ""
+rm -f "$T/bundles/nobk/stack/owl-backup"
+set +e
+run "$T/bundles/nobk" > "$T/run10.out" 2>&1
+rc=$?
+set -e
+check "owl-backup이 없어도 설치는 끝난다" test "$rc" -eq 0
+check "경고가 나온다" grep -q '묶음에 owl-backup이 없어' "$T/run10.out"
 
 echo
 echo "통과 $pass, 실패 $fail"
