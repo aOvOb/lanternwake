@@ -17,16 +17,32 @@ html,body{margin:0;height:100%;overflow:hidden;background:#0b1418;overscroll-beh
   -webkit-tap-highlight-color:transparent}
 body{position:fixed;inset:0}
 canvas{display:block;width:100vw;height:100vh;height:100dvh;touch-action:none}
+/* 닉네임 입력 폼: 캔버스 UI 중 유일한 DOM. 입력 글자는 16px 이상(iOS 가 작은 입력란에 초점이 가면 화면을 확대한다) */
+#nick{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.72);
+  touch-action:manipulation;-webkit-user-select:text;user-select:text;font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;margin:0}
+#nick .box{width:min(320px,86vw);background:#16303a;border:2px solid #ffd34d;border-radius:14px;padding:16px;box-sizing:border-box;color:#ffe9a8;text-align:center}
+#nick .tt{font-size:18px;font-weight:bold;margin-bottom:10px}
+#nick input{width:100%;box-sizing:border-box;font-size:16px;padding:10px;border-radius:8px;border:1px solid #6a8a94;background:#0b1418;color:#fff;
+  -webkit-user-select:text;user-select:text;touch-action:manipulation}
+#nick .er{min-height:34px;margin:8px 0;font-size:13px;color:#ff9a8a;line-height:1.3}
+#nick .bt{display:flex;gap:10px}
+#nick button{flex:1;font-size:16px;padding:11px 0;border-radius:8px;border:1px solid #ffe9a8;background:#28403f;color:#ffe9a8;touch-action:manipulation}
 #safe{position:fixed;inset:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);visibility:hidden;pointer-events:none}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="safe"></div>
+<form id="nick" autocomplete="off"><div class="box"><div class="tt">닉네임 정하기</div>
+<input id="nickIn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-label="닉네임">
+<div class="er" id="nickErr"></div>
+<div class="bt"><button type="button" id="nickCancel">취소</button><button type="submit" id="nickOk">확인</button></div></div></form>
 <script src="./js/config.js"></script>
 <script src="./js/autotest.js"></script>
 <script src="./js/util.js"></script>
 <script src="./js/storage.js"></script>
+<script src="./js/net.js"></script>
+<script src="./js/account.js"></script>
 <script src="./js/quality.js"></script>
 <script src="./js/platform.js"></script>
 <script src="./js/input.js"></script>

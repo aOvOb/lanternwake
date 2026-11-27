@@ -1,5 +1,5 @@
 // 상태 기계와 루프
-// 상태: TITLE, PLAYING, LEVELUP, CHEST, PAUSED, SETTINGS, RESULT
+// 상태: TITLE, PLAYING, LEVELUP, CHEST, PAUSED, SETTINGS, RESULT, ACCOUNT, RANKING(둘 다 TITLE 에서만 들어가고 "뒤로"로 TITLE 에 돌아온다)
 (function () {
   var DT = LW.DT;
   var g = LW.game = {
@@ -10,6 +10,8 @@
     mapStats: { candleSpawned: 0, candleBroken: 0, candleMax: 0, oil: 0, bell: 0, light: 0, purified: 0 },
     toastText: '', toastT: 0, flashT: 0,
     full: false, lastBossKilled: false,
+    // 판 요약 버퍼(계정 제출용). 분마다 처치 수와 레벨, 엘리트와 보스 처치 수. 갱신 중에는 새 객체를 만들지 않는다.
+    runStat: { kpm: new Uint16Array(15), lvm: new Uint8Array(15), minute: 0, elites: 0, bosses: 0 },
     prevBest: { time: 0, kills: 0, level: 0, runs: 0 },
     newBest: { time: false, kills: false, level: false }
   };
@@ -32,7 +34,7 @@
     if (s === 'TITLE' && LW.pwa.reloadIfPending()) return;
     // 화면 꺼짐 방지는 진행 중인 상태(레벨업, 상자 포함)에서 유지한다
     LW.platform.wakeLock(s === 'PLAYING' || s === 'LEVELUP' || s === 'CHEST');
-    if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE' || s === 'SETTINGS') LW.input.onOverlayOpen();
+    if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE' || s === 'SETTINGS' || s === 'ACCOUNT' || s === 'RANKING') LW.input.onOverlayOpen();
     LW.ui.onState(s);
     if (s === 'PLAYING') LW.audio.resume();       // 일시정지를 풀면 오디오도 다시 연다
   };
@@ -46,6 +48,8 @@
     g.passives = [];
     g.chestN = 0; g.chestB = 0; g.chestsOpened = 0;
     g.bossesSeen = []; g.bannerT = 0; g.bossKilled = 0;
+    var rn = g.runStat;
+    rn.kpm.fill(0); rn.lvm.fill(0); rn.minute = 0; rn.elites = 0; rn.bosses = 0;
     g.toastT = 0; g.flashT = 0; g.full = false; g.lastBossKilled = false;
     var rc = LW.records, pb = g.prevBest;
     pb.time = rc.bestTime; pb.kills = rc.bestKills; pb.level = rc.bestLevel; pb.runs = rc.runs;
@@ -59,6 +63,7 @@
     LW.spawner.reset();
     g.weapons = [LW.makeWeapon('ember', 0)];
     perf.maxEnemies = 0; perf.maxNormal = 0; perf.maxAreas = 0;
+    LW.account.onRunStart();
     last = performance.now(); acc = 0;
   };
 
@@ -105,6 +110,7 @@
     nb.kills = pb.runs > 0 && g.kills > pb.kills;
     nb.level = pb.runs > 0 && g.level > pb.level;
     LW.finishRun(g, g.won, g.full);
+    LW.account.onRunEnd(g);
     LW.ui.refreshBest();
     if (g.won) vanishAll();
     LW.ui.buildResult(g);
@@ -120,6 +126,7 @@
     LW.input.resetPointers();
   };
   g.onVisible = function () {
+    if (LW.account.enabled) LW.account.onOnline();      // 앱으로 돌아오면 서버 상태와 못 올린 기록을 다시 확인한다
     last = performance.now();
     acc = 0;
   };
@@ -129,6 +136,9 @@
     if (LW.autotest.active) { LW.autotest.tick(dt); LW.autotest.step(dt); }
     // 1. 시간
     g.time += dt;
+    // 분 경계를 넘을 때마다 그 분이 끝났을 때의 레벨을 기록한다(시간을 건너뛰면 한꺼번에 채운다)
+    var mi = (g.time / 60) | 0, rn = g.runStat;
+    while (rn.minute < mi && rn.minute < 15) rn.lvm[rn.minute++] = g.level;
     if (g.bannerT > 0) g.bannerT -= dt;
     if (g.toastT > 0) g.toastT -= dt;
     if (g.flashT > 0) g.flashT -= dt;
@@ -156,7 +166,7 @@
   // 헤드리스의 가상 시간에서는 rAF가 거의 돌지 않으므로, 자동 검사 때만 타이머로 돌린다
   function schedule() {
     // bench는 실제 시간으로 재야 하므로 rAF를 쓴다
-    if (LW.autotest.active && !LW.params.bench) setTimeout(function () { frame(performance.now()); }, 16);
+    if (LW.autotest.active && !LW.params.bench && !LW.params.rt) setTimeout(function () { frame(performance.now()); }, 16);
     else requestAnimationFrame(frame);
   }
 

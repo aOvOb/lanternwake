@@ -2,10 +2,10 @@
 """Lanternwake 계정 서버. 파이썬 표준 라이브러리와 SQLite만 쓴다.
 
 설계는 DESIGN-ACCOUNT.md를 따른다.
-  serve [--dev] [--static <폴더>] [--host H] [--port N]
+  serve [--dev] [--static <폴더>] [--host H] [--port N]   (`--dev ...`만 써도 serve)
   stats | suspects | hide <runId> | unhide <runId> | ban <userId> | unban <userId>
   rename <userId> <닉네임> | rebuild-best
-환경 변수: GOOGLE_CLIENT_ID(serve 필수), PUBLIC_ORIGIN, DATA, BOUNDS
+환경 변수: GOOGLE_CLIENT_ID(serve 필수, --dev는 없어도 됨), PUBLIC_ORIGIN, DATA, BOUNDS
 """
 import base64
 import bisect
@@ -917,8 +917,8 @@ def new_nickname(c):
     raise RuntimeError("닉네임을 정하지 못함")
 
 
-def login_user(app, ip, sub):
-    """sub로 사용자를 찾거나 만든다. 새 계정은 IP당 하루 5개까지."""
+def login_user(app, ip, sub, limit=True):
+    """sub로 사용자를 찾거나 만든다. 새 계정은 IP당 하루 5개까지(limit=False는 개발용 로그인만)."""
     sub_hash = hmac.new(app.pepper, sub.encode("utf-8"), hashlib.sha256).hexdigest()
     now = app.now()
     with app.db.tx() as c:
@@ -926,7 +926,8 @@ def login_user(app, ip, sub):
         if row is not None:
             c.execute("UPDATE users SET last_seen_at=? WHERE id=?", (now, row["id"]))
             return row["id"]
-        app.limit(ip, "new_account")
+        if limit:
+            app.limit(ip, "new_account")
         name = new_nickname(c)
         cur = c.execute(
             "INSERT INTO users(sub_hash, nickname, nickname_key, nickname_set, created_at, last_seen_at)"
@@ -992,6 +993,26 @@ def h_auth_callback(app, req):
     token = create_session(app, user_id)
     return Resp(303, headers=[clear, session_cookie_header(cfg, token, SESSION_TTL)],
                 location="/?login=ok")
+
+
+DEV_CLIENT_ID = "dev-no-client-id.apps.googleusercontent.com"
+DEV_NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,32}")
+
+
+@route("GET", "/api/dev/login")
+def h_dev_login(app, req):
+    """개발 전용 가짜 로그인(구글 없이 세션 발급). --dev가 아니면 없는 경로와 똑같이 404다.
+
+    이름(name)마다 계정 하나를 만들고 세션 쿠키를 내린 뒤 /?login=ok 로 보낸다.
+    """
+    if not app.cfg.dev:
+        raise ApiError(404, "not_found")
+    name = req.query.get("name", "tester")
+    if not DEV_NAME_RE.fullmatch(name):
+        raise ApiError(400, "bad_request")
+    user_id = login_user(app, req.ip, "dev:" + name, limit=False)
+    token = create_session(app, user_id)
+    return Resp(303, headers=[session_cookie_header(app.cfg, token, SESSION_TTL)], location="/?login=ok")
 
 
 @route("POST", "/api/auth/logout", login="required", allow_banned=True)
@@ -1569,6 +1590,14 @@ PRE_TICKET_SLACK_SEC = 3600   # 표를 받은 지 판 길이보다 1시간 넘�
 
 # ---------------------------------------------------------------- CLI
 
+def ensure_client_id(cfg):
+    """운영 모드는 GOOGLE_CLIENT_ID가 필수다. 개발 모드는 없어도 뜬다(구글 로그인은 못 쓰고 /api/dev/login만 쓴다)."""
+    if not cfg.client_id:
+        if not cfg.dev:
+            sys.exit("GOOGLE_CLIENT_ID 환경 변수가 필요합니다.")
+        cfg.client_id = DEV_CLIENT_ID
+
+
 def cmd_serve(args):
     dev = "--dev" in args
     static = host = port = None
@@ -1587,8 +1616,7 @@ def cmd_serve(args):
         else:
             sys.exit("알 수 없는 인자: " + rest[i])
     cfg = config_from_env(dev=dev, static=static, host=host, port=port)
-    if not cfg.client_id:
-        sys.exit("GOOGLE_CLIENT_ID 환경 변수가 필요합니다.")
+    ensure_client_id(cfg)
     app = App(cfg)
     app.start_janitor()
     server = make_server(app)
@@ -1694,6 +1722,8 @@ def main(argv=None):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")     # 컨테이너 로케일과 상관없이 한글이 깨지지 않게
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0].startswith("--"):
+        argv.insert(0, "serve")          # `game_api.py --dev`는 `serve --dev`와 같다
     if not argv or argv[0] not in COMMANDS:
         sys.exit(__doc__)
     COMMANDS[argv[0]](argv[1:])

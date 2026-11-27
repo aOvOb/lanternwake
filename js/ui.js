@@ -32,7 +32,7 @@
   function makeSpr() { return { val: null, k: 0, cv: document.createElement('canvas'), w: 0, h: 0 }; }
   // 값이 바뀌었는지 먼저 확인해서, 바뀔 때만 문자열을 만든다
   function spChg(s, val) { return s.val !== val || s.k !== LW.render.ppu; }
-  function setSpr(s, val, str, size, color, weight) {
+  function setSpr(s, val, str, size, color, weight, plain) {
     var k = LW.render.ppu;
     if (s.val === val && s.k === k) return;
     s.val = val; s.k = k;
@@ -47,7 +47,7 @@
     cx.lineWidth = 3 * k * 0.6;
     cx.strokeStyle = 'rgba(0,0,0,0.7)';
     cx.fillStyle = color;
-    cx.strokeText(str, 3, size * k * 0.12);
+    if (!plain) cx.strokeText(str, 3, size * k * 0.12);
     cx.fillText(str, 3, size * k * 0.12);
     s.w = w / k; s.h = h / k;
   }
@@ -57,6 +57,7 @@
     ctx.drawImage(s.cv, x, y, s.w, s.h);
   }
   var sprLv = makeSpr(), sprTime = makeSpr(), sprKills = makeSpr(), sprBoss = makeSpr();
+  var sprG = makeSpr();
   var sprW = [], sprP = [];
   for (var si = 0; si < 6; si++) { sprW.push(makeSpr()); sprP.push(makeSpr()); }
 
@@ -92,7 +93,14 @@
   var confirmTitle = false;               // 일시정지에서 "타이틀로"를 한 번 눌렀는지
   ui.settingsFrom = 'TITLE';              // 설정 화면을 연 곳(TITLE 또는 PAUSED)
   ui.bestStr = '';                        // 타이틀의 최고 기록 한 줄
-  ui.onState = function () { confirmTitle = false; };
+  ui.onState = function (s) {
+    confirmTitle = false; confirmDelete = false;
+    if (s === 'RANKING') rank.scroll = 0;
+    // 타이틀로 돌아오면 미리 받은 표를 채우고 못 올린 기록을 다시 올린다(로그인 상태일 때만 일을 한다)
+    if (s === 'TITLE') { LW.account.refillTickets(); LW.account.flushQueue(); }
+    // 계정 화면에 들어올 때 서버가 꺼져 있었다면 다시 확인한다
+    if (s === 'ACCOUNT' && LW.account.enabled && LW.account.status !== 'online') LW.account.onOnline();
+  };
   var cardN = 0;
   ui.layout = function () {
     var g = LW.game, v = LW.view, s = LW.safe;
@@ -113,6 +121,17 @@
       addBtn('settings', tcx - 60, v.h - s.b - 16 - th, 120, th, '설정', 3);
       // Android Chrome에서 설치 이벤트를 받았을 때만 "앱 설치" 버튼을 보인다
       if (LW.pwa.canInstall()) addBtn('install', tcx - 80, v.h - s.b - 16 - th * 2 - 10, 160, th, '앱 설치', 3);
+      // 계정과 순위표(서버 기능이 켜진 환경에서만). 왼쪽 위 계정, 오른쪽 위 순위표.
+      if (LW.account.enabled) {
+        var nk = LW.account.nickname;
+        if (nk !== lastNick) { lastNick = nk; acctLabel = nk.length > 7 ? nk.slice(0, 7) + '…' : nk; }
+        addBtn('account', s.l + 12, s.t + 12, 124, th, LW.account.loggedIn && acctLabel ? acctLabel : '로그인', 7);
+        addBtn('ranking', v.w - s.r - 12 - 100, s.t + 12, 100, th, '순위표', 7);
+      }
+    } else if (st === 'ACCOUNT') {
+      layoutAccount(MIN);
+    } else if (st === 'RANKING') {
+      layoutRanking(MIN);
     } else if (st === 'PAUSED') {
       var bh = Math.max(MIN, 52), y1 = v.h / 2 - bh * 1.5 - 12;
       addBtn('resume', v.w / 2 - 110, y1, 220, bh, '계속', 3);
@@ -175,8 +194,33 @@
         g.setState('TITLE');
         break;
       case 'install': LW.pwa.install(); break;
+      case 'account': if (g.state === 'TITLE') g.setState('ACCOUNT'); break;
+      case 'ranking':
+        if (g.state !== 'TITLE') break;
+        rank.board = 'time';
+        g.setState('RANKING');
+        LW.account.fetchBoard('time');
+        LW.account.fetchBoard('kills');
+        break;
+      case 'tab_time': case 'tab_kills':
+        rank.board = id === 'tab_time' ? 'time' : 'kills';
+        rank.scroll = 0;
+        break;
+      case 'glogin': LW.account.login(); break;
+      case 'nick_edit': ui.openNick(); break;
+      case 'logout': LW.account.logout().then(function (ok) { if (ok) say('로그아웃했어요'); }); break;
+      case 'delete':
+        if (!confirmDelete) {
+          confirmDelete = true;
+          var un = LW.account.queueCount();
+          delLabel = un > 0 ? '올리지 못한 기록 ' + un + '개도 지워져요. 한 번 더' : '정말 삭제할까요? 한 번 더';
+          break;
+        }
+        confirmDelete = false;
+        LW.account.deleteAccount().then(function (ok) { if (ok) say('계정을 삭제했어요'); });
+        break;
       case 'settings': ui.settingsFrom = g.state === 'PAUSED' ? 'PAUSED' : 'TITLE'; g.setState('SETTINGS'); break;
-      case 'back': g.setState(ui.settingsFrom); break;
+      case 'back': g.setState(g.state === 'ACCOUNT' || g.state === 'RANKING' ? 'TITLE' : ui.settingsFrom); break;
       case 'set_sound': cfg.sound = !cfg.sound; LW.saveSettings(); LW.audio.applySettings(); break;
       case 'set_vib': cfg.vibrate = !cfg.vibrate; LW.saveSettings(); LW.audio.vibrate(30); break;
       case 'set_dmg': cfg.dmgNumbers = !cfg.dmgNumbers; LW.saveSettings(); LW.quality.apply(LW.quality.level); break;
@@ -263,8 +307,14 @@
     }
     if (st === 'TITLE') {
       if (code === 'Enter' || code === 'Space') g.start();
-    } else if (st === 'SETTINGS') {
+    } else if (st === 'SETTINGS' || st === 'ACCOUNT') {
       if (code === 'Escape' || code === 'Backspace') ui.act('back');
+    } else if (st === 'RANKING') {
+      if (code === 'Escape' || code === 'Backspace') ui.act('back');
+      else if (code === 'ArrowDown') rank.scroll += ROW_H * 3;
+      else if (code === 'ArrowUp') rank.scroll -= ROW_H * 3;
+      else if (code === 'ArrowLeft') ui.act('tab_time');
+      else if (code === 'ArrowRight') ui.act('tab_kills');
     } else if (st === 'PLAYING') {
       if (code === 'Escape' || code === 'KeyP') g.setState('PAUSED');
       else if (LW.params.debug) {
@@ -296,6 +346,15 @@
 
   ui.handleInput = function () {
     var inp = LW.input, g = LW.game, i, k;
+    if (g.state === 'RANKING') { rank.scroll -= inp.dragDy / LW.view.scale; }
+    inp.dragDy = 0;
+    // 로그인 직후 닉네임을 아직 안 정했으면 한 번 입력을 연다(자동 검사 중에는 열지 않는다)
+    if (LW.account.promptNick && g.state === 'TITLE' && !nickOpen && !LW.autotest.active) {
+      LW.account.promptNick = false;
+      g.setState('ACCOUNT');
+      ui.openNick();
+    }
+    if (nickOpen) { inp.evN = 0; inp.keyN = 0; nPress = 0; return; }
     ui.layout();
     for (i = 0; i < inp.evN; i++) {
       var type = inp.evType[i], id = inp.evId[i], x = inp.evX[i], y = inp.evY[i];
@@ -416,15 +475,25 @@
   var sprBtn = [];
   for (var sb = 0; sb < 12; sb++) sprBtn.push(makeSpr());
   function drawButton(ctx, b, i) {
+    var k = b.kind, google = k === 6;
     rrect(ctx, b.x, b.y, b.w, b.h, 10);
-    ctx.fillStyle = b.kind === 3 ? 'rgba(40,60,66,0.95)' : 'rgba(0,0,0,0.45)';
+    ctx.fillStyle = google ? '#ffffff' : (k === 9 ? 'rgba(110,92,30,0.95)' : (k === 3 || k === 7 ? 'rgba(40,60,66,0.95)' : 'rgba(0,0,0,0.45)'));
+    // 서버에 연결할 수 없으면 구글 로그인 버튼을 흐리게 한다
+    if (google && !LW.net.up) ctx.globalAlpha = 0.45;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,233,168,0.7)';
+    ctx.strokeStyle = google ? '#8a8a8a' : 'rgba(255,233,168,0.7)';
     ctx.lineWidth = 2;
     ctx.stroke();
     var sp = sprBtn[i];
-    if (spChg(sp, b.label)) setSpr(sp, b.label, b.label, b.kind === 3 ? 20 : 16, '#ffe9a8');
-    drawSpr(ctx, sp, b.x + b.w / 2, b.y + b.h / 2 - sp.h / 2 + 1, 1);
+    var fs = k === 3 || k === 9 ? 20 : (k === 7 ? 15 : (google ? 17 : 16));
+    if (spChg(sp, b.label)) setSpr(sp, b.label, b.label, fs, google ? '#1f1f1f' : '#ffe9a8', google ? 'normal' : 'bold', google);
+    if (google) {
+      // 구글 로그인 버튼의 "G" 표지(공식 로고 파일이 없어 글자로 그린다)
+      if (spChg(sprG, 'G')) setSpr(sprG, 'G', 'G', 22, '#4285f4', 'bold', true);
+      drawSpr(ctx, sprG, b.x + 22, b.y + b.h / 2 - sprG.h / 2 + 1, 1);
+      drawSpr(ctx, sp, b.x + b.w / 2 + 14, b.y + b.h / 2 - sp.h / 2 + 1, 1);
+      ctx.globalAlpha = 1;
+    } else drawSpr(ctx, sp, b.x + b.w / 2, b.y + b.h / 2 - sp.h / 2 + 1, 1);
   }
 
   function drawJoystick(ctx) {
@@ -575,9 +644,19 @@
   ui.drawTitleScene = function (ctx, g) {
     curFont = '';
     ui.layout();
+    // 계정과 순위표는 타이틀의 배경만 어둡게 깔고 그 위에 그린다(올빼미와 안내 글은 그리지 않는다)
+    if (g.state === 'ACCOUNT' || g.state === 'RANKING') {
+      ctx.fillStyle = LW.render.bgPat;
+      ctx.fillRect(0, 0, LW.view.w, LW.view.h);
+      dim(ctx, 0.82);
+      return g.state === 'ACCOUNT' ? drawAccount(ctx) : drawRanking(ctx);
+    }
     titleScene(ctx, g);
     if (g.state === 'TITLE') {
       for (var bi2 = 0; bi2 < nBtn; bi2++) drawButton(ctx, btns[bi2], bi2);
+      if (LW.account.enabled && LW.account.status === 'offline') {
+        text(ctx, '오프라인', LW.safe.l + 12 + 62, LW.safe.t + 12 + Math.max(44 / LW.view.scale, 44) + 10, 11, '#ff9a8a', 'center', 'normal');
+      }
       // iOS Safari는 설치 이벤트가 없어 안내 한 줄만 보인다(홈 화면에 추가한 앱 안에서는 숨김)
       if (LW.pwa.showIosHint()) {
         var vw = LW.view, sf = LW.safe;
@@ -618,6 +697,7 @@
     if (res.sub) { text(ctx, res.sub, cx, ly, 14, '#ffd34d', 'center', 'normal'); ly += 24; }
     text(ctx, res.stat, cx, ly, 16, '#ffffff');
     if (res.best) text(ctx, res.best, cx, ly + 28, 15, '#7be38d');
+    if (LW.account.resultLine) text(ctx, LW.account.resultLine, cx, ly + (res.best ? 54 : 28), 14, '#9fd0ff', 'center', 'normal');
     // 무기별 누적 피해
     text(ctx, '무기별 누적 피해', listX + listW / 2, listY - 22, 14, '#ffe9a8');
     for (i = 0; i < n; i++) {
@@ -650,6 +730,221 @@
     else if (st === 'RESULT') drawResult(ctx, g);
     if (ui.dbgOverlay && LW.params.debug) drawDebug(ctx);
   };
+
+  // ===== 계정과 순위표 화면 =====
+  // 배경은 타이틀의 바닥 무늬를 어둡게 깐 것이고, 글자는 fillText 로 그린다(고정 문구는 줄바꿈을 한 번만 계산한다).
+  var nickOpen = false, delLabel = '';
+  var rank = { board: 'time', scroll: 0, maxScroll: 0, top: 0, bottom: 0, left: 0, w: 0, statusY: 0, meY: 0 };
+  var ROW_H = 30;
+  var ac = { cx: 0, statusY: 0, nickY: 0, infoY: 0, textX: 0, textY: 0, textW: 0, backY: 0 };
+  var confirmDelete = false;
+  var acctLabel = '', lastNick = null;
+  var mctx = document.createElement('canvas').getContext('2d');
+  var wraps = {};
+  function say(m) { LW.account.msg = m; LW.account.msgAt = performance.now(); }
+
+  // 공백 기준 줄바꿈(한 단어가 폭보다 길면 글자 단위로 자른다). 폭이 같으면 이전 결과를 재사용한다.
+  function wrap(id, str, size, maxW) {
+    var c = wraps[id];
+    if (c && c.w === maxW) return c.lines;
+    mctx.font = fontOf(size, 'normal');
+    var words = str.split(' '), lines = [], cur = '', i, j;
+    for (i = 0; i < words.length; i++) {
+      var t = cur ? cur + ' ' + words[i] : words[i];
+      if (mctx.measureText(t).width <= maxW) { cur = t; continue; }
+      if (cur) { lines.push(cur); cur = ''; }
+      t = words[i];
+      while (mctx.measureText(t).width > maxW && t.length > 1) {
+        for (j = t.length - 1; j > 1 && mctx.measureText(t.slice(0, j)).width > maxW; j--) { /* 자를 위치 찾기 */ }
+        lines.push(t.slice(0, j)); t = t.slice(j);
+      }
+      cur = t;
+    }
+    if (cur) lines.push(cur);
+    wraps[id] = { w: maxW, lines: lines };
+    return lines;
+  }
+
+  var HELP_GUEST = '로그인하면 기록과 설정이 다른 기기와 이어지고 순위표에 오를 수 있어요. 구글에서는 계정 번호만 받고, 이메일과 이름은 받지 않아요.';
+  var HELP_PRIVACY = '저장하는 것은 계정 번호의 해시, 닉네임, 판 기록, 설정 3가지예요. 순위표에는 닉네임과 기록, 달성일만 나와요. 구글 쪽 연결은 구글 계정 설정의 "서드 파티 연결"에서 끊을 수 있어요.';
+
+  function layoutAccount(MIN) {
+    var v = LW.view, s = LW.safe, A = LW.account;
+    var bh = Math.max(MIN, v.portrait ? 50 : 44);
+    var bw, bx, y;
+    if (v.portrait) {
+      bw = Math.min(300, v.w - 40 - s.l - s.r); bx = (v.w - bw) / 2;
+      ac.cx = v.w / 2;
+    } else {
+      bw = Math.min(260, v.w * 0.4); bx = Math.max(s.l + 24, v.w * 0.27 - bw / 2);
+      ac.cx = bx + bw / 2;
+    }
+    ac.statusY = s.t + 70;
+    y = s.t + 92;
+    if (!A.loggedIn) {
+      addBtn('glogin', bx, y, bw, bh, 'Google 계정으로 로그인', 6);
+      y += bh + 16;
+    } else {
+      ac.nickY = y + 26;
+      y += 52;
+      addBtn('nick_edit', bx, y, bw, bh, '닉네임 바꾸기', 3); y += bh + 8;
+      ac.infoY = y + 8; y += 50;
+      addBtn('logout', bx, y, bw, bh, '로그아웃', 3); y += bh + 8;
+      addBtn('delete', bx, y, bw, bh, confirmDelete ? delLabel : '계정 삭제', 3); y += bh + 8;
+    }
+    ac.backY = v.h - s.b - 16 - bh;
+    if (v.portrait) {
+      addBtn('back', bx, ac.backY, bw, bh, '뒤로', 3);
+      ac.textX = v.w / 2 - Math.min(v.w - 48, 360) / 2; ac.textW = Math.min(v.w - 48, 360); ac.textY = y + 6;
+    } else {
+      // 가로 화면은 높이가 모자라 "뒤로"를 오른쪽 열 아래에 둔다
+      ac.textX = Math.max(v.w * 0.56, bx + bw + 24); ac.textW = v.w - s.r - 24 - ac.textX; ac.textY = s.t + 92;
+      addBtn('back', ac.textX, ac.backY, Math.min(260, ac.textW), bh, '뒤로', 3);
+    }
+  }
+
+  var statusStrs = {
+    off: '이 환경에서는 계정 기능을 쓸 수 없어요', checking: '서버에 연결하는 중',
+    offlineGuest: '오프라인: 지금은 로그인할 수 없어요 (인터넷 연결이 필요해요)',
+    offlineIn: '오프라인: 기록은 연결되면 올라가요', onlineIn: '온라인'
+  };
+  var accInfo = { t: -1, k: -1, l: -1, q: -1, rec: '', up: '' };
+
+  function drawAccount(ctx) {
+    var v = LW.view, s = LW.safe, A = LW.account, i;
+    text(ctx, '계정', v.w / 2, s.t + 38, 28, '#ffe9a8');
+    var st = A.status, str = st === 'off' ? statusStrs.off : (st === 'checking' ? statusStrs.checking
+      : (st === 'offline' ? (A.loggedIn ? statusStrs.offlineIn : statusStrs.offlineGuest) : (A.loggedIn ? statusStrs.onlineIn : '')));
+    if (str) text(ctx, str, ac.cx, ac.statusY, 12, st === 'offline' ? '#ff9a8a' : '#9fd0ff', 'center', 'normal');
+    for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
+    var y = ac.textY, q = 0;
+    if (A.loggedIn) {
+      text(ctx, '닉네임', ac.cx, ac.nickY - 20, 12, '#c9d6da', 'center', 'normal');
+      text(ctx, A.nickname, ac.cx, ac.nickY + 2, 22, '#ffffff');
+      var r = A.records();
+      q = A.queueCount();
+      if (accInfo.t !== r.bestTimeMs || accInfo.k !== r.bestKills || accInfo.l !== r.bestLevel || accInfo.q !== q) {
+        accInfo.t = r.bestTimeMs; accInfo.k = r.bestKills; accInfo.l = r.bestLevel; accInfo.q = q;
+        accInfo.rec = '서버 기록  ' + LW.fmtTime(r.bestTimeMs / 1000) + '   처치 ' + r.bestKills + '   레벨 ' + r.bestLevel;
+        accInfo.up = q > 0 ? '올리지 못한 기록 ' + q + '개' : '올리지 못한 기록 없음';
+      }
+      text(ctx, accInfo.rec, ac.cx, ac.infoY, 13, '#ffe9a8', 'center', 'normal');
+      text(ctx, accInfo.up, ac.cx, ac.infoY + 20, 13, q > 0 ? '#ffd34d' : '#c9d6da', 'center', 'normal');
+    }
+    // 안내문: 게스트면 로그인 안내와 개인정보, 로그인 상태면 개인정보만
+    var maxY = ac.backY - 26, lines, k;
+    if (!A.loggedIn) {
+      lines = wrap('guest', HELP_GUEST, 13, ac.textW);
+      for (k = 0; k < lines.length && y < maxY; k++) { text(ctx, lines[k], ac.textX, y, 13, '#e8e8f0', 'left', 'normal'); y += 18; }
+      y += 8;
+    }
+    lines = wrap('priv', HELP_PRIVACY, 12, ac.textW);
+    for (k = 0; k < lines.length && y < maxY; k++) { text(ctx, lines[k], ac.textX, y, 12, '#9fb2b8', 'left', 'normal'); y += 17; }
+    if (A.msg && performance.now() - A.msgAt < 4000) text(ctx, A.msg, v.w / 2, ac.backY - 14, 14, '#ffd34d');
+  }
+
+  // 닉네임 입력: 캔버스 UI 에서 유일한 DOM 폼. 열려 있는 동안 캔버스 입력은 무시한다.
+  var nickForm = document.getElementById('nick'), nickIn = document.getElementById('nickIn');
+  var nickErr = document.getElementById('nickErr');
+  var nickBusy = false;
+  ui.nickOpen = function () { return nickOpen; };
+  ui.openNick = function () {
+    if (!nickForm || nickOpen || !LW.account.loggedIn) return;
+    nickOpen = true;
+    nickIn.value = LW.account.nicknameSet ? LW.account.nickname : '';
+    nickErr.textContent = '';
+    nickForm.style.display = 'flex';
+    LW.input.resetPointers();
+    try { nickIn.focus(); } catch (e) { /* 무시 */ }
+  };
+  ui.closeNick = function () {
+    if (!nickForm) return;
+    nickOpen = false;
+    nickForm.style.display = 'none';
+    try { nickIn.blur(); } catch (e) { /* 무시 */ }
+    LW.input.onOverlayOpen();
+  };
+  if (nickForm) {
+    nickForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (nickBusy) return;
+      nickBusy = true;
+      LW.account.setNickname(nickIn.value).then(function (r) {
+        nickBusy = false;
+        if (r.ok) { ui.closeNick(); say('닉네임을 저장했어요'); }
+        else nickErr.textContent = r.error;
+      });
+    });
+    document.getElementById('nickCancel').addEventListener('click', function () { ui.closeNick(); });
+    nickForm.addEventListener('click', function (e) { if (e.target === nickForm) ui.closeNick(); });
+    nickIn.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.preventDefault(); ui.closeNick(); } });
+  }
+
+  function layoutRanking(MIN) {
+    var v = LW.view, s = LW.safe, A = LW.account;
+    var cw = Math.min(v.w - 24 - s.l - s.r, 420), cx = (v.w - cw) / 2;
+    var th = Math.max(MIN, 40), ty = s.t + 56, bh = Math.max(MIN, 46);
+    addBtn('tab_time', cx, ty, cw / 2 - 4, th, '생존 시간', rank.board === 'time' ? 9 : 3);
+    addBtn('tab_kills', cx + cw / 2 + 4, ty, cw / 2 - 4, th, '처치 수', rank.board === 'kills' ? 9 : 3);
+    var by = v.h - s.b - 14 - bh;
+    addBtn('back', cx, by, cw, bh, '뒤로', 3);
+    rank.left = cx; rank.w = cw;
+    rank.statusY = ty + th + 14;
+    rank.top = ty + th + 28;
+    rank.meY = by - 22;
+    rank.bottom = rank.meY - 14;
+    var n = A.boards[rank.board].rows.length;
+    rank.maxScroll = Math.max(0, n * ROW_H - (rank.bottom - rank.top));
+    if (rank.scroll > rank.maxScroll) rank.scroll = rank.maxScroll;
+    if (rank.scroll < 0) rank.scroll = 0;
+  }
+
+  var rkStat = { f: -1, st: false, board: '', str: '' };
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  function rankStatus(b) {
+    if (b.loading) return '불러오는 중';
+    if (rkStat.f !== b.fetchedAt || rkStat.st !== b.stale || rkStat.board !== rank.board) {
+      rkStat.f = b.fetchedAt; rkStat.st = b.stale; rkStat.board = rank.board;
+      var at = '';
+      if (b.fetchedAt) { var d = new Date(b.fetchedAt); at = pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+      if (b.stale) rkStat.str = at ? '오프라인: 저장된 순위표 (갱신 ' + at + ')' : '오프라인: 저장된 순위표가 없어요';
+      else rkStat.str = '갱신 ' + at;
+    }
+    return rkStat.str;
+  }
+
+  function drawRanking(ctx) {
+    var v = LW.view, s = LW.safe, A = LW.account, i;
+    var b = A.boards[rank.board], rows = b.rows, n = rows.length;
+    text(ctx, '순위표', v.w / 2, s.t + 30, 26, '#ffe9a8');
+    for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
+    text(ctx, rankStatus(b), v.w / 2, rank.statusY, 12, b.stale ? '#ff9a8a' : '#9fd0ff', 'center', 'normal');
+
+    var top = rank.top, h = rank.bottom - rank.top, cx = rank.left, cw = rank.w;
+    if (n === 0) {
+      text(ctx, b.loading ? '불러오는 중' : (b.stale ? '오프라인이에요' : '아직 기록이 없어요'), v.w / 2, top + h / 2, 16, '#c9d6da', 'center', 'normal');
+    } else {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(cx, top, cw, h); ctx.clip();
+      var first = Math.max(0, Math.floor(rank.scroll / ROW_H)), last = Math.min(n - 1, Math.ceil((rank.scroll + h) / ROW_H));
+      var ry;
+      for (i = first; i <= last; i++) {
+        ry = top + i * ROW_H - rank.scroll;
+        ctx.fillStyle = rows[i].mine ? 'rgba(255,211,77,0.22)' : (i & 1 ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)');
+        ctx.fillRect(cx, ry, cw, ROW_H - 2);
+      }
+      // 칸(열)마다 모아서 그려 글꼴 전환을 줄인다
+      for (i = first; i <= last; i++) text(ctx, rows[i].rank, cx + 30, top + i * ROW_H - rank.scroll + ROW_H / 2 - 1, 13, '#ffe9a8', 'right');
+      for (i = first; i <= last; i++) text(ctx, rows[i].name, cx + 42, top + i * ROW_H - rank.scroll + ROW_H / 2 - 1, 14, rows[i].mine ? '#ffd34d' : '#ffffff', 'left');
+      for (i = first; i <= last; i++) text(ctx, rows[i].sub, cx + cw - 82, top + i * ROW_H - rank.scroll + ROW_H / 2 - 1, 11, rows[i].dawn ? '#ffe9a8' : '#9fb2b8', 'right', 'normal');
+      for (i = first; i <= last; i++) text(ctx, rows[i].val, cx + cw - 10, top + i * ROW_H - rank.scroll + ROW_H / 2 - 1, 15, '#ffd34d', 'right');
+      ctx.restore();
+    }
+    // 내 순위 고정 줄. 게스트는 로그인 안내.
+    var mine = A.loggedIn && b.hasMe;
+    var me = !A.loggedIn ? '로그인하면 순위에 오를 수 있어요' : (b.hasMe ? b.meStr : '아직 순위에 오른 기록이 없어요');
+    text(ctx, me, v.w / 2, rank.meY, 15, mine ? '#7be38d' : '#c9d6da', 'center', mine ? 'bold' : 'normal');
+  }
 
   ui.refreshBest();
 })();

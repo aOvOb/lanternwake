@@ -1,7 +1,8 @@
 // 버전 올리기와 캐시 목록 갱신
 // 사용법: node tools/release.js 1.0.1
 // 1. js/config.js의 LW.VERSION과 sw.js의 VERSION을 바꾼다.
-// 2. 배포 대상(index.html, manifest.webmanifest, js/**/*.js, icons/*.png)을 훑어 sw.js의 ASSETS를 다시 쓴다.
+// 2. 배포 대상(index.html, manifest.webmanifest, js/**/*.js, icons/*.png)을 훑어 sw.js의 ASSETS를 다시 쓴다. server/ 는 훑지 않는다.
+// 3. tools/gen-bounds.js 를 불러 server/bounds.json 의 자동 영역(엘리트, 보스 시각, 경험치 표)을 게임 데이터에 맞춘다.
 // 파일을 하나라도 바꿔 배포할 때는 반드시 실행한다. 바이트가 바뀐 sw.js가 곧 갱신 신호다.
 'use strict';
 const fs = require('fs');
@@ -54,3 +55,6 @@ edit('sw.js', function (s) {
   }, '@assets');
 });
 console.log('버전 ' + ver + ', 캐시 파일 ' + assets.length + '개');
+
+const gb = require('child_process').spawnSync(process.execPath, [path.join(__dirname, 'gen-bounds.js')], { stdio: 'inherit' });
+if (gb.status !== 0) { console.error('gen-bounds 실패'); process.exit(1); }

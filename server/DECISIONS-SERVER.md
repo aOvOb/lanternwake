@@ -59,3 +59,10 @@ DESIGN-ACCOUNT.md에서 모호했던 부분을 구현하면서 정한 내용이�
 - Caddy 쪽 권장(OwL-server 레포의 Caddyfile에서 적용, 이 저장소에서는 못 고침): game 사이트에 `request_body { max_size 64KB }`와 `reverse_proxy` 안에 `transport http { read_timeout 20s }`를 둔다. 적용 여부는 확인 필요.
 - JWKS 캐시에 키가 하나도 없으면 다시 받는 간격이 30초(`JWKS_RETRY_EMPTY_SEC`)다. 키가 있을 때는 그대로 5분이다.
 - B6(승리 판의 `timeMs`는 정확히 900000이어야 한다): 서버는 바꾸지 않는다. 클라이언트(S22)가 승리 판의 `timeMs`를 `LW.WIN_TIME * 1000`으로 고정해 보내야 한다.
+
+## 개발 전용 가짜 로그인 (S20~S23 클라이언트 검사용)
+
+- `GET /api/dev/login?name=이름`(이름은 영문, 숫자, `_`, `-` 1~32자, 기본 `tester`)은 `--dev`에서만 동작한다. 이름마다 계정 하나를 만들고(`sub`는 `dev:이름`) 세션 쿠키를 내린 뒤 `303 /?login=ok`로 보낸다. 새 계정 IP 제한(`new_account`)은 걸지 않는다.
+- `--dev`가 아니면 이 경로는 없는 경로와 같은 `404 not_found`이고, 쿠키도 사용자도 만들지 않는다. 환경 변수(`DEV` 등)로 켤 수 없다. `tests/test_dev_login.py`가 보장한다.
+- `serve --dev`는 `GOOGLE_CLIENT_ID`가 없으면 자리표시 값(`DEV_CLIENT_ID`)으로 뜬다. 운영 모드는 그대로 종료한다. `game_api.py --dev`처럼 첫 인자가 `--`로 시작하면 `serve`로 본다.
+

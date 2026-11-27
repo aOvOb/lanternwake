@@ -1,11 +1,12 @@
 // Service worker: 버전 이름이 붙은 캐시를 cache-first로 쓴다.
 // VERSION과 ASSETS는 tools/release.js가 고친다. 손으로 고치지 않는다.
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const CACHE = 'lanternwake-' + VERSION;
 const ASSETS = [ /* @assets-start */
   './',
   './index.html',
   './manifest.webmanifest',
+  './js/account.js',
   './js/audio.js',
   './js/autotest.js',
   './js/config.js',
@@ -25,6 +26,7 @@ const ASSETS = [ /* @assets-start */
   './js/grid.js',
   './js/input.js',
   './js/main.js',
+  './js/net.js',
   './js/platform.js',
   './js/quality.js',
   './js/render.js',

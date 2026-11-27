@@ -84,6 +84,7 @@
     nHeld = addId(held, nHeld, e.pointerId);
     if (performance.now() < inp.lockUntil) { nIgn = addId(ign, nIgn, e.pointerId); return; }
     var x = toLx(e.clientX), y = toLy(e.clientY);
+    if (LW.game.state === 'RANKING') { drag.id = e.pointerId; drag.y = e.clientY; drag.total = 0; }
     if (LW.game.state === 'PLAYING' && !joy.active && !LW.ui.hit(x, y)) {
       joy.active = true; joy.id = e.pointerId;
       joy.cx = joy.x = e.clientX; joy.cy = joy.y = e.clientY;
@@ -92,13 +93,21 @@
       pushEv(0, e.pointerId, x, y);
     }
   });
+  // 순위표 목록의 세로 끌기: 프레임 사이에 쌓인 이동량(CSS px)을 ui 가 가져간다. 8px 넘게 움직이면 탭이 아니라 끌기로 본다.
+  var drag = { id: -1, y: 0, total: 0 };
+  inp.dragDy = 0;
   canvas.addEventListener('pointermove', function (e) {
     if (joy.active && e.pointerId === joy.id) updateJoy(e.clientX, e.clientY);
+    if (drag.id === e.pointerId) {
+      inp.dragDy += e.clientY - drag.y; drag.total += Math.abs(e.clientY - drag.y); drag.y = e.clientY;
+    }
   });
+  canvas.addEventListener('wheel', function (e) { e.preventDefault(); inp.dragDy -= e.deltaY; }, { passive: false });
   function up(e, cancel) {
     nHeld = delId(held, nHeld, e.pointerId);
     if (has(ign, nIgn, e.pointerId) >= 0) { nIgn = delId(ign, nIgn, e.pointerId); return; }
     if (joy.active && joy.id === e.pointerId) { inp.releaseJoy(); return; }
+    if (drag.id === e.pointerId) { drag.id = -1; if (drag.total > 8) cancel = true; }   // 끌었으면 버튼이 눌린 것으로 보지 않는다
     pushEv(cancel ? 2 : 1, e.pointerId, toLx(e.clientX), toLy(e.clientY));
   }
   canvas.addEventListener('pointerup', function (e) { up(e, false); });
@@ -111,6 +120,8 @@
   // 키보드
   var PREVENT = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1, Enter: 1, Escape: 1 };
   window.addEventListener('keydown', function (e) {
+    // 닉네임 입력란에서 치는 글자는 게임 키로 처리하지 않는다
+    if (e.target && e.target.id === 'nickIn') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (PREVENT[e.code] || e.code.indexOf('Key') === 0 || e.code.indexOf('Digit') === 0) e.preventDefault();
     if (e.repeat) return;

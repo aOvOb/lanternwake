@@ -9,9 +9,19 @@
 (function () {
   var N = LW.params.autotest;
   var BENCH = LW.params.bench;
+  var FLOW = LW.params.flow === 'acct';
+  var flow = { active: false, step: 0, t: 0, log: [] };   // 판이 끝난 뒤 계정, 순위표 화면을 거치는 시나리오(flow=acct)
+  var acctSince = 0;                                      // acct=1: 계정 준비를 기다리기 시작한 시각
   var benchPlay = 0, benchLast = 0;   // bench: PLAYING 상태로 흐른 실제 시간(ms)
   var START = LW.params.start;
   var at = LW.autotest = { active: N > 0, done: false, errors: [], seconds: N, angle: 0, endTime: START + N, snapsTaken: [] };
+  // 게스트 기록과 설정 심기: storage.js 보다 먼저 실행되므로 LW.records 와 LW.settings 가 이 값을 읽는다
+  if (LW.params.guestRec && N > 0) {
+    try {
+      localStorage.setItem('lanternwake.v1.records', JSON.stringify({ bestTime: 120, bestKills: 200, bestLevel: 5, wins: 0, runs: 3, fullDawns: 0 }));
+      localStorage.setItem('lanternwake.v1.settings', JSON.stringify({ sound: false, vibrate: true, dmgNumbers: true, quality: 'auto', rev: Date.now() }));
+    } catch (e) { /* 무시 */ }
+  }
   var dir = { x: 0, y: 0 };
   var snaps = LW.params.snap.slice().sort(function (a, b) { return a - b; });
   var snapIdx = 0;
@@ -163,6 +173,10 @@
     if (LW.chest && LW.chest.hasEvolvable() && g.giveChest) g.giveChest(false);
   }
 
+  function sinkPost(name, body) {
+    if (!LW.params.sink) return;
+    try { fetch('/__sink/' + name, { method: 'POST', body: body, keepalive: body.length < 60000 }).catch(function () { /* 무시 */ }); } catch (e) { /* 무시 */ }
+  }
   function takeSnap(t) {
     var url = '';
     try { url = LW.canvas.toDataURL('image/png'); } catch (e) { push('snap: ' + str(e)); }
@@ -171,6 +185,74 @@
     pre.textContent = url.slice(url.indexOf(',') + 1);
     document.body.appendChild(pre);
     at.snapsTaken.push(t);
+    sinkPost('snap-' + t + '.b64', pre.textContent);
+  }
+
+  // 계정 준비 대기(acct=1): 서버 확인과 가짜 로그인, 시작 표 받기가 끝나거나 10초가 지날 때까지 타이틀에서 기다린다
+  function acctReady(now) {
+    var A = LW.account;
+    if (!acctSince) acctSince = now;
+    if (now - acctSince > 10000) return true;
+    if (A.status === 'checking') return false;
+    if (LW.params.devLogin && A.status === 'online' && !A.verified) return false;
+    if (A.loggedIn && A.status === 'online' && A.ticketCount() < 1) return false;
+    return true;
+  }
+
+  // 판이 끝난 뒤 화면 순례: 결과 줄, 계정(닉네임 폼 포함), 순위표 두 보드, 로그아웃 뒤 게스트 화면. 끝나면 false.
+  function ptr(type, x, y) {
+    LW.canvas.dispatchEvent(new PointerEvent(type, { pointerId: 7, clientX: x, clientY: y, bubbles: true, isPrimary: true, pointerType: 'touch' }));
+  }
+  function flowTick(g, now) {
+    var A = LW.account, ui = LW.ui;
+    if (!flow.t) flow.t = now;
+    var age = now - flow.t;
+    function next() { flow.step++; flow.t = 0; }
+    var boardsReady = !A.boards.time.loading && !A.boards.kills.loading;
+    switch (flow.step) {
+      case 0:
+        if ((A.lastStatus !== 'pending' || age > 10000) && age >= 800) {
+          flow.log.push('result: ' + A.resultLine + ' queue=' + A.queueCount());
+          takeSnap('result'); next();
+        }
+        break;
+      case 1: ui.act('title'); next(); break;
+      case 2: if (age >= 400) { ui.act('account'); next(); } break;
+      case 3:
+        if (age >= 500) {
+          takeSnap('account');
+          // 닉네임 폼: 열고, 값을 넣고, 제출한다(DOM 폼 경로)
+          ui.openNick();
+          flow.log.push('nickOpen: ' + ui.nickOpen());
+          var inEl = document.getElementById('nickIn');
+          inEl.value = 'AutoOwl';
+          document.getElementById('nick').dispatchEvent(new Event('submit', { cancelable: true }));
+          next();
+        }
+        break;
+      case 4:
+        if (!ui.nickOpen() || age > 5000) { flow.log.push('nickname: ' + A.nickname + ' set=' + A.nicknameSet); next(); }
+        break;
+      case 5: if (age >= 500) { takeSnap('account-nick'); ui.act('back'); next(); } break;
+      case 6: ui.act('ranking'); next(); break;
+      case 7:
+        if (age >= 1500 && boardsReady) { takeSnap('ranking'); flow.sub = 0; ptr('pointerdown', 220, 520); next(); }
+        break;
+      case 8:
+        // 세로 끌기: 실제 포인터 이벤트로 목록을 위로 민다(입력 모듈의 끌기 경로)
+        flow.sub++;
+        ptr('pointermove', 220, 520 - flow.sub * 70);
+        if (flow.sub >= 5) { ptr('pointerup', 220, 520 - flow.sub * 70); next(); }
+        break;
+      case 9: if (age >= 300) { takeSnap('ranking-scrolled'); ui.act('tab_kills'); next(); } break;
+      case 10: if (age >= 500) { takeSnap('ranking-kills'); ui.act('back'); next(); } break;
+      case 11: A.logout(); next(); break;
+      case 12: if (!A.loggedIn || age > 5000) { ui.act('account'); next(); } break;
+      case 13: if (age >= 500) { takeSnap('account-guest'); ui.act('back'); ui.act('ranking'); next(); } break;
+      case 14: if (age >= 1500 && boardsReady) { takeSnap('ranking-guest'); next(); } break;
+      default: return false;
+    }
+    return true;
   }
 
   // 프레임마다 호출: 타이틀 통과, 카드와 상자 자동 처리, 스냅샷, 종료 판정
@@ -184,7 +266,9 @@
       benchLast = now;
       if (benchPlay >= BENCH * 1000) { at.finish(); return; }
     }
+    if (flow.active) { if (!flowTick(g, now)) at.finish(); return; }
     if (g.state === 'TITLE') {
+      if (LW.params.acct && !acctReady(now)) return;
       // snapstate=TITLE이면 타이틀이 그려진 뒤 첫 스냅샷을 찍고 시작한다
       if (sst === 'TITLE' && snapIdx < snaps.length) {
         if (!titleAt) titleAt = now;
@@ -207,6 +291,7 @@
         noteRoundStart(g);
       } else if (!more && (sst !== 'RESULT' || snapIdx >= snaps.length) && rage >= 100) {
         if (ROUNDS > 0) { at.roundEnds.push(endNote(g)); roundsDone = roundNo; }
+        if (FLOW && !flow.active) { flow.active = true; return; }
         at.finish();
       }
       return;
@@ -329,10 +414,20 @@
       snaps: at.snapsTaken
     };
     if (BENCH) res.bench = benchStats(p);
+    if (LW.params.acct) {
+      var Ac = LW.account;
+      res.account = {
+        status: Ac.status, netUp: LW.net.up, loggedIn: Ac.loggedIn, verified: Ac.verified, uid: Ac.uid, nickname: Ac.nickname, nicknameSet: Ac.nicknameSet,
+        queue: Ac.queueCount(), tickets: Ac.ticketCount(), lastStatus: Ac.lastStatus, resultLine: Ac.resultLine, records: Ac.records(),
+        boards: { time: { rows: Ac.boards.time.rows.length, me: Ac.boards.time.meStr, stale: Ac.boards.time.stale }, kills: { rows: Ac.boards.kills.rows.length, me: Ac.boards.kills.meStr, stale: Ac.boards.kills.stale } },
+        flow: flow.log, msg: Ac.msg, search: location.search, settings: { sound: LW.settings.sound, rev: LW.settings.rev }
+      };
+    }
     var pre = document.createElement('pre');
     pre.id = 'autotest';
     pre.textContent = JSON.stringify(res);
     document.body.appendChild(pre);
+    sinkPost('result.json', pre.textContent);
     if (BENCH) {
       // 헤드리스에서 dump-dom을 기다리지 않도록 제목을 바꾸고, 결과를 개발 서버(tools/bench.sh)로 보낸다
       document.title = 'BENCH_DONE';
@@ -343,5 +438,5 @@
   // 게임이 시작되지 못한 경우에도 JSON이 남도록 하는 감시 타이머
   setTimeout(function () {
     at.finish('watchdog: 게임 시간 ' + N + '초에 도달하지 못함');
-  }, BENCH ? N * 2000 + 30000 : N * 1500 + 8000);
+  }, BENCH ? N * 2000 + 30000 : (LW.params.rt ? N * 2000 + 60000 : N * 1500 + 8000));
 })();

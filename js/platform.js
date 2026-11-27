@@ -72,13 +72,15 @@
   }
 
   // 제스처와 기본 동작 차단
-  function prevent(e) { e.preventDefault(); }
+  // 닉네임 입력 폼(#nick) 안은 막지 않는다(막으면 입력란에 초점이 가지 않는다)
+  function inNick(e) { var t = e.target; return !!(t && t.closest && t.closest('#nick')); }
+  function prevent(e) { if (inNick(e)) return; e.preventDefault(); }
   document.addEventListener('touchstart', prevent, { passive: false });
   document.addEventListener('touchmove', prevent, { passive: false });
   document.addEventListener('gesturestart', prevent, { passive: false });
   document.addEventListener('gesturechange', prevent, { passive: false });
   document.addEventListener('dblclick', prevent, { passive: false });
-  document.addEventListener('contextmenu', prevent, { passive: false });
+  document.addEventListener('contextmenu', function (e) { if (!inNick(e)) e.preventDefault(); }, { passive: false });
 
   window.addEventListener('resize', scheduleResize);
   window.addEventListener('orientationchange', scheduleResize);

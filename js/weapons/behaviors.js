@@ -376,6 +376,10 @@
     var g = LW.game;
     e.active = false;
     g.kills++;
+    var rn = g.runStat, mi = (g.time / 60) | 0;       // 계정 제출용 분별 처치, 엘리트, 보스 수
+    rn.kpm[mi > 14 ? 14 : mi]++;
+    if (e.elite) rn.elites++;
+    if (e.boss) rn.bosses++;
     LW.spawnGem(e.x, e.y, e.xp);
     // 기름: 일반 적 0.3%, 엘리트는 상자와 함께 50%
     if (e.elite) { LW.dropChest(e.x, e.y, false); if (LW.rand() < 0.5) LW.dropOil(e.x + 16, e.y, true); }

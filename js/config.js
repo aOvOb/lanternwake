@@ -3,7 +3,7 @@ window.LW = window.LW || {};
 (function () {
   var q = new URLSearchParams(location.search);
 
-  LW.VERSION = '0.2.0';
+  LW.VERSION = '0.3.0';
   LW.DT = 1 / 60;
   LW.MAX_STEPS = 4;
   LW.WIN_TIME = 900;
@@ -34,8 +34,25 @@ window.LW = window.LW || {};
     snapState: q.get('snapstate') || '',
     build: q.get('build') || (Number(q.get('bench')) > 0 ? 'all' : ''),
     start: Math.max(0, q.get('start') === null && Number(q.get('bench')) > 0 ? 780 : Number(q.get('start')) || 0),
-    snap: (q.get('snap') || '').split(',').map(Number).filter(function (v) { return v > 0; })
+    snap: (q.get('snap') || '').split(',').map(Number).filter(function (v) { return v > 0; }),
+    // 계정: noacct=1 계정 기능 끄기. 자동 검사는 기본으로 끄고 acct=1이면 켠다. devlogin=이름은 개발 서버의 가짜 로그인(자동 검사용),
+    // rt=1은 자동 검사를 실제 시간(rAF)으로 돌리고(서버의 경과 시간 검사 때문), sink=1은 결과를 /__sink/ 로 보낸다(tools/devserver.py --sink),
+    // flow=acct는 판이 끝난 뒤 ACCOUNT, RANKING 화면을 거쳐 스냅샷을 남긴다
+    noacct: q.get('noacct') === '1',
+    acct: q.get('acct') === '1',
+    devLogin: q.get('devlogin') || '',
+    rt: q.get('rt') === '1',
+    sink: q.get('sink') === '1',
+    flow: q.get('flow') || '',
+    // guestrec=1은 자동 검사 시작 전에 게스트 기록(최고 시간 120초 등)과 소리 꺼짐 설정을 저장소에 심는다(가져오기와 설정 동기화 검사용)
+    guestRec: q.get('guestrec') === '1'
   };
+
+  // 계정 API(같은 출처). 게스트로 바로 플레이하고 서버가 없으면 계정 기능만 "오프라인"이 된다.
+  LW.API = './api/';
+  LW.ACCOUNT = isSecureContext && !LW.params.noacct && (LW.params.autotest === 0 || LW.params.acct);
+  LW.TICKET_POOL = 5;
+  LW.QUEUE_MAX = 50;
 
   // 화면: 짧은 변 450 단위, 긴 변 최대 1050 단위
   LW.SHORT = 450;
