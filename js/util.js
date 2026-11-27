@@ -16,6 +16,10 @@
   var rng = LW.mulberry32(LW.params.autotest ? 12345 : ((Date.now() ^ (Math.random() * 1e9)) >>> 0));
   LW.rand = function () { return rng(); };
   LW.randRange = function (a, b) { return a + (b - a) * rng(); };
+  // 그리기 전용 난수. 파티클과 데미지 숫자처럼 게임 결과에 영향이 없는 곳만 쓴다.
+  // 화질 단계에 따라 호출 횟수가 달라져도 게임 난수 흐름이 바뀌지 않게 따로 둔다.
+  var fxRng = LW.mulberry32(LW.params.autotest ? 54321 : ((Date.now() ^ (Math.random() * 1e9)) >>> 0));
+  LW.fxRand = function () { return fxRng(); };
 
   // 가중치 랜덤 선택: ws는 숫자 배열, total은 합계
   LW.weightedPick = function (ws, total) {

@@ -1,7 +1,9 @@
-// 레벨업 후보 생성과 선택. 패시브 후보는 S6에서 같은 방식으로 더한다.
+// 레벨업 후보 생성과 선택. 후보 버퍼와 카드 객체 3개는 미리 만들어 재사용한다(열 때 배열, 객체를 새로 만들지 않는다).
 (function () {
+  function mkCard() { return { type: '', id: '', name: '', color: '', tag: '', desc: '' }; }
   var lu = LW.levelup = {
-    cands: [],       // 후보 카드 {type, id, name, color, tag, desc}
+    cands: [mkCard(), mkCard(), mkCard()],   // 화면에 보이는 카드 {type, id, name, color, tag, desc}
+    n: 0,                                    // 카드 수(1~3)
     focus: 0,
     openedAt: 0
   };
@@ -18,65 +20,76 @@
     return out;
   }
 
-  // 후보 풀: 보유 무기 중 Lv8 미만, 슬롯이 남았으면 아직 없는 무기. 보유 1.5, 새 항목 1.0
-  function buildPool(out, ws) {
+  // 후보 풀 버퍼: 종류(0 무기, 1 패시브), 정의, 현재 레벨(0이면 새 항목), 가중치
+  var MAXP = 32;
+  var pType = new Int8Array(MAXP), pLv = new Int8Array(MAXP), pW = new Float32Array(MAXP), pDef = new Array(MAXP), pn = 0;
+  function addCand(type, def, lv, w) {
+    if (pn >= MAXP) return;
+    pType[pn] = type; pDef[pn] = def; pLv[pn] = lv; pW[pn] = w; pn++;
+  }
+
+  // 보유 무기 중 Lv8 미만, 슬롯이 남았으면 아직 없는 무기. 보유 1.5, 새 항목 1.0
+  function buildPool() {
     var g = LW.game, list = g.weapons, i, j;
+    pn = 0;
     for (i = 0; i < list.length; i++) {
       var w = list[i];
       if (w.lv >= w.def.maxLv || w.evolved) continue;
-      out.push({
-        type: 'weapon', id: w.def.id, name: w.def.name, color: w.def.color,
-        tag: 'Lv ' + w.lv + ' → ' + (w.lv + 1), desc: weaponDiff(w.def, w.lv)
-      });
-      ws.push(1.5);
+      addCand(0, w.def, w.lv, 1.5);
     }
     if (list.length < LW.WEAPON_SLOTS) {
       for (i = 0; i < LW.WEAPONS.length; i++) {
         var def = LW.WEAPONS[i], owned = false;
         for (j = 0; j < list.length; j++) if (list[j].def === def) owned = true;
-        if (owned) continue;
-        out.push({ type: 'weapon', id: def.id, name: def.name, color: def.color, tag: '새로 얻음', desc: '레벨 1' });
-        ws.push(1.0);
+        if (!owned) addCand(0, def, 0, 1.0);
+      }
+    }
+    var pl = g.passives;
+    for (i = 0; i < pl.length; i++) {
+      if (pl[i].lv >= pl[i].def.maxLv) continue;
+      addCand(1, pl[i].def, pl[i].lv, 1.5);
+    }
+    if (pl.length < LW.PASSIVE_SLOTS) {
+      for (i = 0; i < LW.PASSIVES.length; i++) {
+        var pd = LW.PASSIVES[i], own = false;
+        for (j = 0; j < pl.length; j++) if (pl[j].def === pd) own = true;
+        if (!own) addCand(1, pd, 0, 1.0);
       }
     }
   }
 
-  function buildPassives(out, ws) {
-    var g = LW.game, list = g.passives, i, j;
-    for (i = 0; i < list.length; i++) {
-      var p = list[i];
-      if (p.lv >= p.def.maxLv) continue;
-      out.push({ type: 'passive', id: p.def.id, name: p.def.name, color: p.def.color,
-        tag: 'Lv ' + p.lv + ' → ' + (p.lv + 1), desc: p.def.desc });
-      ws.push(1.5);
-    }
-    if (list.length < LW.PASSIVE_SLOTS) {
-      for (i = 0; i < LW.PASSIVES.length; i++) {
-        var def = LW.PASSIVES[i], owned = false;
-        for (j = 0; j < list.length; j++) if (list[j].def === def) owned = true;
-        if (owned) continue;
-        out.push({ type: 'passive', id: def.id, name: def.name, color: def.color, tag: '새로 얻음', desc: def.desc });
-        ws.push(1.0);
-      }
+  // 후보 i를 카드 c에 채운다
+  function fillCard(c, i) {
+    var def = pDef[i], lv = pLv[i];
+    c.type = pType[i] === 0 ? 'weapon' : 'passive';
+    c.id = def.id; c.name = def.name; c.color = def.color;
+    if (lv > 0) {
+      c.tag = 'Lv ' + lv + ' → ' + (lv + 1);
+      c.desc = pType[i] === 0 ? weaponDiff(def, lv) : def.desc;
+    } else {
+      c.tag = '새로 얻음';
+      c.desc = pType[i] === 0 ? '레벨 1' : def.desc;
     }
   }
 
   lu.open = function () {
-    var g = LW.game;
-    var pool = [], ws = [];
-    buildPool(pool, ws);
-    buildPassives(pool, ws);
-    lu.cands = [];
-    if (pool.length === 0) {
-      lu.cands.push({ type: 'heal', id: 'oil', name: '등잔 기름', color: '#ffd34d', tag: '회복', desc: 'HP 30 회복' });
+    var g = LW.game, i;
+    buildPool();
+    if (pn === 0) {
+      var h = lu.cands[0];
+      h.type = 'heal'; h.id = 'oil'; h.name = '등잔 기름'; h.color = '#ffd34d'; h.tag = '회복'; h.desc = 'HP 30 회복';
+      lu.n = 1;
     } else {
-      // 중복 없이 최대 3개
-      for (var n = 0; n < 3 && pool.length > 0; n++) {
-        var total = 0, i;
-        for (i = 0; i < ws.length; i++) total += ws[i];
-        var pick = LW.weightedPick(ws, total);
-        lu.cands.push(pool[pick]);
-        pool.splice(pick, 1); ws.splice(pick, 1);
+      // 중복 없이 최대 3개. 뽑은 항목은 맨 뒤 항목으로 덮어 뺀다.
+      lu.n = 0;
+      while (lu.n < 3 && pn > 0) {
+        var total = 0;
+        for (i = 0; i < pn; i++) total += pW[i];
+        var r = LW.rand() * total, pick = pn - 1;
+        for (i = 0; i < pn; i++) { r -= pW[i]; if (r < 0) { pick = i; break; } }
+        fillCard(lu.cands[lu.n++], pick);
+        var last = --pn;
+        pType[pick] = pType[last]; pDef[pick] = pDef[last]; pLv[pick] = pLv[last]; pW[pick] = pW[last];
       }
     }
     lu.focus = 0;
@@ -88,7 +101,7 @@
 
   lu.choose = function (i) {
     var g = LW.game;
-    if (g.state !== 'LEVELUP' || i < 0 || i >= lu.cands.length) return;
+    if (g.state !== 'LEVELUP' || i < 0 || i >= lu.n) return;
     var c = lu.cands[i];
     if (c.type === 'weapon') {
       var list = g.weapons, found = null;

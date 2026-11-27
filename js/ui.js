@@ -8,7 +8,7 @@
   var btns = [];
   for (var bi = 0; bi < 12; bi++) btns.push({ id: '', x: 0, y: 0, w: 0, h: 0, label: '', kind: 0 });
   var nBtn = 0;
-  var pressId = new Int32Array(8), pressBtn = new Int32Array(8), nPress = 0;
+  var pressId = new Int32Array(8), pressBid = ['', '', '', '', '', '', '', ''], nPress = 0;   // 누른 포인터와 누른 버튼 id
   var CARD_IDS = ['c0', 'c1', 'c2'];
 
   function addBtn(id, x, y, w, h, label, kind) {
@@ -30,6 +30,8 @@
 
   // ===== 캐시되는 문자 =====
   function makeSpr() { return { val: null, k: 0, cv: document.createElement('canvas'), w: 0, h: 0 }; }
+  // 값이 바뀌었는지 먼저 확인해서, 바뀔 때만 문자열을 만든다
+  function spChg(s, val) { return s.val !== val || s.k !== LW.render.ppu; }
   function setSpr(s, val, str, size, color, weight) {
     var k = LW.render.ppu;
     if (s.val === val && s.k === k) return;
@@ -59,8 +61,15 @@
   for (var si = 0; si < 6; si++) { sprW.push(makeSpr()); sprP.push(makeSpr()); }
 
   // ===== 글자 도우미(오버레이와 타이틀용) =====
+  // 폰트 문자열은 (굵기, 크기)마다 한 번만 만들고, 같은 폰트면 ctx.font를 다시 지정하지 않는다
+  var FONTS = { bold: {}, normal: {} }, curFont = '';
+  function fontOf(size, weight) {
+    var t = weight === 'normal' ? FONTS.normal : FONTS.bold;
+    return t[size] || (t[size] = (weight === 'normal' ? 'normal ' : 'bold ') + size + 'px ' + FONT);
+  }
   function text(ctx, str, x, y, size, color, align, weight) {
-    ctx.font = (weight || 'bold') + ' ' + size + 'px ' + FONT;
+    var f = fontOf(size, weight);
+    if (f !== curFont) { ctx.font = f; curFont = f; }
     ctx.textAlign = align || 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = color;
@@ -102,7 +111,7 @@
     } else if (st === 'CHEST') {
       addBtn('chest_ok', 0, 0, v.w, v.h, '', 5);
     } else if (st === 'LEVELUP') {
-      var n = LW.levelup.cands.length;
+      var n = LW.levelup.n;
       cardN = n;
       if (v.portrait) {
         var cw = Math.min(v.w - 32, 400), gap = 12;
@@ -185,7 +194,7 @@
     } else if (st === 'PAUSED') {
       if (code === 'Escape' || code === 'KeyP' || code === 'Enter') g.setState('PLAYING');
     } else if (st === 'LEVELUP') {
-      var n = lu.cands.length;
+      var n = lu.n;
       if (code === 'Digit1') lu.choose(0);
       else if (code === 'Digit2') lu.choose(1);
       else if (code === 'Digit3') lu.choose(2);
@@ -205,17 +214,21 @@
     for (i = 0; i < inp.evN; i++) {
       var type = inp.evType[i], id = inp.evId[i], x = inp.evX[i], y = inp.evY[i];
       if (type === 0) {
-        if (nPress < 8) { pressId[nPress] = id; pressBtn[nPress] = btnAt(x, y); nPress++; }
+        if (nPress < 8) {
+          var bi0 = btnAt(x, y);
+          pressId[nPress] = id; pressBid[nPress] = bi0 >= 0 ? btns[bi0].id : ''; nPress++;
+        }
       } else {
         var idx = -1;
         for (k = 0; k < nPress; k++) if (pressId[k] === id) { idx = k; break; }
         if (idx < 0) continue;
-        var b = pressBtn[idx];
-        pressId[idx] = pressId[nPress - 1]; pressBtn[idx] = pressBtn[nPress - 1]; nPress--;
+        var bid = pressBid[idx];
+        pressId[idx] = pressId[nPress - 1]; pressBid[idx] = pressBid[nPress - 1]; nPress--;
         if (type === 2) continue;
-        if (b >= 0) {
-          // 누른 버튼과 같은 버튼 위에서 뗐을 때만 눌린 것으로 본다
-          if (btnAt(x, y) === b) { ui.act(btns[b].id); ui.layout(); }
+        if (bid !== '') {
+          // 누른 버튼과 같은 버튼(id) 위에서 뗐을 때만 눌린 것으로 본다. 배열 위치는 레이아웃이 바뀌면 달라질 수 있다.
+          var cur = btnAt(x, y);
+          if (cur >= 0 && btns[cur].id === bid) { ui.act(bid); ui.layout(); }
         } else if (g.state === 'TITLE') {
           g.start();
         }
@@ -240,13 +253,13 @@
 
     // 레벨, 타이머, 처치 수
     var ty = s.t + 14;
-    setSpr(sprLv, g.level, 'Lv ' + g.level, 15, '#ffe9a8');
+    if (spChg(sprLv, g.level)) setSpr(sprLv, g.level, 'Lv ' + g.level, 15, '#ffe9a8');
     drawSpr(ctx, sprLv, s.l + 8, ty, 0);
     var sec = Math.floor(g.time);
-    setSpr(sprTime, sec, LW.fmtTime(sec), 18, '#ffffff');
+    if (spChg(sprTime, sec)) setSpr(sprTime, sec, LW.fmtTime(sec), 18, '#ffffff');
     drawSpr(ctx, sprTime, v.w / 2, ty, 1);
     var pauseW = Math.max(44 / v.scale, 44);
-    setSpr(sprKills, g.kills, '처치 ' + g.kills, 14, '#e8e8f0');
+    if (spChg(sprKills, g.kills)) setSpr(sprKills, g.kills, '처치 ' + g.kills, 14, '#e8e8f0');
     drawSpr(ctx, sprKills, v.w - s.r - 8 - pauseW - 8, ty, 2);
 
     // 무기와 패시브 칸(표시 전용)
@@ -292,19 +305,24 @@
     if (w) {
       ctx.fillStyle = w.evo ? w.evo.color : w.def.color;
       ctx.beginPath(); ctx.arc(x + sz / 2, y + sz / 2 - 2, 7, 0, TAU); ctx.fill();
-      setSpr(spr, w.lv, String(w.lv), 10, '#ffffff');
+      if (spChg(spr, w.lv)) setSpr(spr, w.lv, String(w.lv), 10, '#ffffff');
       drawSpr(ctx, spr, x + sz - spr.w + 2, y + sz - spr.h + 3, 0);
     }
   }
 
-  function drawButton(ctx, b) {
+  // 버튼 라벨은 칸마다 문자 캐시를 쓴다(그릴 때 폰트를 바꾸지 않는다)
+  var sprBtn = [];
+  for (var sb = 0; sb < 12; sb++) sprBtn.push(makeSpr());
+  function drawButton(ctx, b, i) {
     rrect(ctx, b.x, b.y, b.w, b.h, 10);
     ctx.fillStyle = b.kind === 3 ? 'rgba(40,60,66,0.95)' : 'rgba(0,0,0,0.45)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255,233,168,0.7)';
     ctx.lineWidth = 2;
     ctx.stroke();
-    text(ctx, b.label, b.x + b.w / 2, b.y + b.h / 2 + 1, b.kind === 3 ? 20 : 16, '#ffe9a8');
+    var sp = sprBtn[i];
+    if (spChg(sp, b.label)) setSpr(sp, b.label, b.label, b.kind === 3 ? 20 : 16, '#ffe9a8');
+    drawSpr(ctx, sp, b.x + b.w / 2, b.y + b.h / 2 - sp.h / 2 + 1, 1);
   }
 
   function drawJoystick(ctx) {
@@ -341,6 +359,7 @@
     lines.push('피해x' + st.might.toFixed(2) + ' 쿨x' + st.cooldown.toFixed(2) + ' 범위x' + st.area.toFixed(2) + ' 지속x' + st.duration.toFixed(2) + ' 속도x' + st.projSpeed.toFixed(2) + ' +' + st.amount);
     lines.push('이동x' + LW.player.moveMul.toFixed(2) + ' HP ' + LW.player.maxHp + ' 재생 ' + LW.player.regen.toFixed(1) + ' 자석 ' + LW.player.magnet + ' 방어 ' + LW.player.armor);
     ctx.font = '10px monospace';
+    curFont = '';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     var y = s.t + 70;
@@ -360,7 +379,7 @@
   }
 
   function drawCards(ctx) {
-    var lu = LW.levelup, n = lu.cands.length, v = LW.view;
+    var lu = LW.levelup, n = lu.n, v = LW.view;
     dim(ctx, 0.7);
     var titleY = btns[0] ? btns[0].y - 34 : v.h * 0.2;
     if (titleY < LW.safe.t + 20) titleY = LW.safe.t + 20;
@@ -412,6 +431,7 @@
 
   // 타이틀 임시본. 완성본은 S10에서 다듬는다.
   ui.drawTitle = function (ctx) {
+    curFont = '';
     var v = LW.view, s = LW.safe, R = LW.render;
     var t = performance.now() / 1000;
     ctx.fillStyle = R.bgPat;
@@ -442,6 +462,7 @@
   };
 
   ui.draw = function (ctx, g) {
+    curFont = '';
     ui.layout();
     var v = LW.view, i, st = g.state;
     drawHud(ctx, g);
@@ -449,21 +470,21 @@
     if (st === 'PLAYING') drawJoystick(ctx);
     for (i = 0; i < nBtn && st !== 'LEVELUP'; i++) {
       if (btns[i].id === 'resume' || btns[i].id === 'retry' || btns[i].id === 'title' || btns[i].id === 'chest_ok') continue;
-      drawButton(ctx, btns[i]);
+      drawButton(ctx, btns[i], i);
     }
     if (st === 'LEVELUP') drawCards(ctx);
     else if (st === 'CHEST') drawChest(ctx);
     else if (st === 'PAUSED') {
       dim(ctx, 0.6);
       text(ctx, '일시정지', v.w / 2, v.h / 2 - 70, 30, '#ffe9a8');
-      for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i]);
+      for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
     } else if (st === 'RESULT') {
       dim(ctx, 0.7);
       var won = g.won;
       text(ctx, won ? '새벽이 밝았다' : '등불이 꺼졌다', v.w / 2, v.h * 0.34 + 0, 30, '#ffe9a8');
       drawOwlBig(ctx, v.w / 2, v.h * 0.2, Math.min(v.w, v.h) * 0.22, won ? 1 : 0, 0, 0);
       text(ctx, '생존 ' + LW.fmtTime(g.time) + '   레벨 ' + g.level + '   처치 ' + g.kills, v.w / 2, v.h * 0.34 + 40, 16, '#ffffff');
-      for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i]);
+      for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
     }
     if (ui.dbgOverlay && LW.params.debug) drawDebug(ctx);
   };

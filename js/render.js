@@ -36,7 +36,12 @@
   };
 
   // 등불 위치(올빼미 중심 기준, 단위 1배 기준). 진행 방향 쪽에 둔다.
-  LW.owlLantern = function (facing) { return { x: facing * 9, y: facing === 0 ? 17 : 15 }; };
+  // 호출마다 객체를 만들지 않도록 공용 객체를 채워서 돌려준다(바로 쓰고 보관하지 않는다).
+  var lanternPos = { x: 0, y: 0 };
+  LW.owlLantern = function (facing) {
+    lanternPos.x = facing * 9; lanternPos.y = facing === 0 ? 17 : 15;
+    return lanternPos;
+  };
 
   // ===== 올빼미 =====
   // x, y: 몸 중심. scale: 1이면 반경 12 단위 크기. opts: { facing, bob, flame, blink }
@@ -378,8 +383,9 @@
     for (var i = 0; i < n; i++) {
       var gm = items[i];
       if (gm.x < l || gm.x > r || gm.y < t || gm.y > b) continue;
-      var s = gm.value >= 10 ? 6 : 4.5;
-      ctx.fillStyle = gm.value >= 10 ? GEM_COLORS[2] : (gm.value >= 2 ? GEM_COLORS[1] : GEM_COLORS[0]);
+      var red = gm.value >= 10 || gm.merged;     // 병합된 보석은 값과 상관없이 빨강
+      var s = red ? 6 : 4.5;
+      ctx.fillStyle = red ? GEM_COLORS[2] : (gm.value >= 2 ? GEM_COLORS[1] : GEM_COLORS[0]);
       ctx.beginPath();
       ctx.moveTo(gm.x, gm.y - s); ctx.lineTo(gm.x + s * 0.75, gm.y);
       ctx.lineTo(gm.x, gm.y + s); ctx.lineTo(gm.x - s * 0.75, gm.y);
@@ -439,7 +445,7 @@
   function drawPlayer(ctx, g) {
     var P = LW.player;
     var now = R.time;
-    var f = 0.9 + 0.2 * Math.sin(now * 13 + Math.sin(now * 4.3) * 2.5);   // 불꽃 크기 +-8% 안팎
+    var f = 1 + 0.08 * Math.sin(now * 13 + Math.sin(now * 4.3) * 2.5);   // 불꽃 크기 +-8%
     var dir = P.facing >= 0 ? 1 : -1;
     var lan = LW.owlLantern(dir);
     var lx = P.x + lan.x, ly = P.y + lan.y;
@@ -667,6 +673,7 @@
     }
   }
 
+  var DMG_FONT = 'bold 11px ' + LW.FONT;
   function drawEffects(ctx, l, r, t, b) {
     var items = LW.particles.items, n = LW.particles.n, i;
     for (i = 0; i < n; i++) {
@@ -679,7 +686,7 @@
     ctx.globalAlpha = 1;
     var dn = LW.dmgNums.items, m = LW.dmgNums.n;
     if (m > 0) {
-      ctx.font = 'bold 11px ' + LW.FONT;
+      ctx.font = DMG_FONT;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       for (i = 0; i < m; i++) {

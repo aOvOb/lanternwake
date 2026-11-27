@@ -1,4 +1,4 @@
-// 파티클과 데미지 숫자. 화면에 보이는 상한은 화질 단계가 정한다.
+// 파티클과 데미지 숫자. 화면에 보이는 상한은 화질 단계가 정한다. 난수는 그리기 전용 LW.fxRand를 쓴다.
 (function () {
   var COLORS = ['#ffd34d', '#ff9a3c', '#c9a0ff', '#e8e8f0'];
 
@@ -15,10 +15,10 @@
     for (var i = 0; i < n; i++) {
       var p = particles.spawn(LW.quality.particleCap);
       if (!p) return;
-      var a = LW.rand() * 6.2832, s = 40 + LW.rand() * 80;
+      var a = LW.fxRand() * 6.2832, s = 40 + LW.fxRand() * 80;
       p.x = x; p.y = y; p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s;
-      p.maxLife = p.life = 0.3 + LW.rand() * 0.2;
-      p.r = 1.5 + LW.rand() * 1.5;
+      p.maxLife = p.life = 0.3 + LW.fxRand() * 0.2;
+      p.r = 1.5 + LW.fxRand() * 1.5;
       p.color = COLORS[(colorIdx + (i & 1)) % COLORS.length];
     }
   };
@@ -29,7 +29,7 @@
     var d = dmgNums.spawn(cap);
     if (!d) return;
     var v = Math.round(amount);
-    d.x = x + (LW.rand() - 0.5) * 8; d.y = y; d.life = 0.6;
+    d.x = x + (LW.fxRand() - 0.5) * 8; d.y = y; d.life = 0.6;
     d.str = v < 1000 ? LW.numStr[v < 0 ? 0 : v] : '999+';
   };
 

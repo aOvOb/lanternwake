@@ -2,7 +2,7 @@
 (function () {
   var seq = 0;
   var gems = LW.gems = LW.makePool(LW.POOL.gems, function () {
-    return { active: false, x: 0, y: 0, value: 0, homing: false, spd: 0, seq: 0 };
+    return { active: false, x: 0, y: 0, value: 0, homing: false, spd: 0, seq: 0, merged: false };
   });
   // 맵 아이템. kind: 0 상자, 1 보스 상자 (S9에서 촛대와 아이템을 더한다)
   var pk = LW.pickups = LW.makePool(LW.POOL.pickups, function () {
@@ -17,16 +17,17 @@
     it.kind = boss ? LW.PK.BOSS_CHEST : LW.PK.CHEST; it.x = x; it.y = y;
   };
 
-  // 보석을 떨어뜨린다. 풀이 가득 차면 가장 오래된 보석에 값을 더한다(색은 값이 정한다).
+  // 보석을 떨어뜨린다. 풀이 가득 차면 가장 오래된 보석에 값을 더하고 빨강으로 표시한다.
   LW.spawnGem = function (x, y, value) {
     var gm = gems.spawn();
     if (!gm) {
       var items = gems.items, oldest = items[0];
       for (var i = 1; i < gems.n; i++) if (items[i].seq < oldest.seq) oldest = items[i];
       oldest.value += value;
+      oldest.merged = true;
       return oldest;
     }
-    gm.x = x; gm.y = y; gm.value = value; gm.homing = false; gm.spd = 0; gm.seq = ++seq;
+    gm.x = x; gm.y = y; gm.value = value; gm.homing = false; gm.spd = 0; gm.seq = ++seq; gm.merged = false;
     return gm;
   };
 
