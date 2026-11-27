@@ -28,6 +28,8 @@
     if (prev === s) return;
     g.state = s;
     if (prev === 'PLAYING') LW.input.releaseJoy();
+    // 새 버전이 대기 중이었다면 타이틀로 돌아올 때 새로고침한다
+    if (s === 'TITLE' && LW.pwa.reloadIfPending()) return;
     // 화면 꺼짐 방지는 진행 중인 상태(레벨업, 상자 포함)에서 유지한다
     LW.platform.wakeLock(s === 'PLAYING' || s === 'LEVELUP' || s === 'CHEST');
     if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE' || s === 'SETTINGS') LW.input.onOverlayOpen();

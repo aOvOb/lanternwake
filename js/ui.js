@@ -111,6 +111,8 @@
     } else if (st === 'TITLE') {
       var th = Math.max(MIN, 44), tcx = v.portrait ? v.w / 2 : v.w * 0.7;
       addBtn('settings', tcx - 60, v.h - s.b - 16 - th, 120, th, '설정', 3);
+      // Android Chrome에서 설치 이벤트를 받았을 때만 "앱 설치" 버튼을 보인다
+      if (LW.pwa.canInstall()) addBtn('install', tcx - 80, v.h - s.b - 16 - th * 2 - 10, 160, th, '앱 설치', 3);
     } else if (st === 'PAUSED') {
       var bh = Math.max(MIN, 52), y1 = v.h / 2 - bh * 1.5 - 12;
       addBtn('resume', v.w / 2 - 110, y1, 220, bh, '계속', 3);
@@ -172,6 +174,7 @@
         }
         g.setState('TITLE');
         break;
+      case 'install': LW.pwa.install(); break;
       case 'settings': ui.settingsFrom = g.state === 'PAUSED' ? 'PAUSED' : 'TITLE'; g.setState('SETTINGS'); break;
       case 'back': g.setState(ui.settingsFrom); break;
       case 'set_sound': cfg.sound = !cfg.sound; LW.saveSettings(); LW.audio.applySettings(); break;
@@ -573,8 +576,14 @@
     curFont = '';
     ui.layout();
     titleScene(ctx, g);
-    if (g.state === 'TITLE') drawButton(ctx, btns[0], 0);
-    else drawSettings(ctx);
+    if (g.state === 'TITLE') {
+      for (var bi2 = 0; bi2 < nBtn; bi2++) drawButton(ctx, btns[bi2], bi2);
+      // iOS Safari는 설치 이벤트가 없어 안내 한 줄만 보인다(홈 화면에 추가한 앱 안에서는 숨김)
+      if (LW.pwa.showIosHint()) {
+        var vw = LW.view, sf = LW.safe;
+        text(ctx, '공유 버튼, 홈 화면에 추가', vw.portrait ? vw.w / 2 : vw.w * 0.7, vw.h - sf.b - 16 - Math.max(44 / vw.scale, 44) - 18, 13, '#ffe9a8', 'center', 'normal');
+      }
+    } else drawSettings(ctx);
   };
 
   function drawSettings(ctx) {

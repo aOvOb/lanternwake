@@ -115,10 +115,59 @@
   };
   LW.platform.wakeLockOn = function () { return !!lock; };
 
-  // 서비스 워커: 등록은 S13. nosw=1이면 등록된 것을 모두 해제한다.
-  if (LW.params.nosw && navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
-    navigator.serviceWorker.getRegistrations().then(function (regs) {
-      for (var i = 0; i < regs.length; i++) regs[i].unregister();
-    }).catch(function () { /* 무시 */ });
+  // ===== 서비스 워커와 설치 안내 =====
+  // 새 버전이 적용되면(controllerchange) TITLE에서는 바로 새로고침하고, 그 밖의 상태에서는 TITLE로 돌아올 때 새로고침한다.
+  var pwa = LW.pwa = { deferred: null, reloadPending: false, reg: null };
+  var ua = navigator.userAgent || '';
+  pwa.ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  pwa.standalone = navigator.standalone === true || !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  // Android Chrome: 설치 이벤트를 저장해 두었다가 타이틀의 "앱 설치" 버튼이 누를 때 prompt()를 부른다
+  pwa.canInstall = function () { return !!pwa.deferred; };
+  pwa.install = function () {
+    var d = pwa.deferred;
+    if (!d) return;
+    pwa.deferred = null;
+    try { d.prompt(); } catch (e) { /* 무시 */ }
+  };
+  // iOS Safari는 설치 이벤트가 없어 안내 문구만 보인다
+  pwa.showIosHint = function () { return pwa.ios && !pwa.standalone; };
+  window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); pwa.deferred = e; });
+  window.addEventListener('appinstalled', function () { pwa.deferred = null; pwa.standalone = true; });
+  // 대기 중이던 새로고침을 실행한다(TITLE로 들어올 때 game.js가 부른다). 실행했으면 true.
+  pwa.reloadIfPending = function () {
+    if (!pwa.reloadPending) return false;
+    pwa.reloadPending = false;
+    location.reload();
+    return true;
+  };
+
+  var sw = navigator.serviceWorker;
+  if (LW.params.nosw) {
+    // 개발용: 등록된 서비스 워커와 이 게임의 캐시를 모두 지운다
+    if (sw && sw.getRegistrations) {
+      sw.getRegistrations().then(function (regs) {
+        for (var i = 0; i < regs.length; i++) regs[i].unregister();
+      }).catch(function () { /* 무시 */ });
+    }
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (ks) {
+        for (var i = 0; i < ks.length; i++) if (ks[i].indexOf('lanternwake-') === 0) caches.delete(ks[i]);
+      }).catch(function () { /* 무시 */ });
+    }
+  } else if (sw && window.isSecureContext) {
+    // 처음 방문의 clients.claim()으로 생기는 controllerchange에는 새로고침하지 않는다(이미 최신이다)
+    var hadController = !!sw.controller;
+    sw.addEventListener('controllerchange', function () {
+      if (!hadController) { hadController = true; return; }
+      if (LW.game && LW.game.state === 'TITLE') location.reload();
+      else pwa.reloadPending = true;
+    });
+    window.addEventListener('load', function () {
+      sw.register('./sw.js').then(function (reg) { pwa.reg = reg; }).catch(function () { /* 등록 실패해도 게임은 정상 */ });
+    });
+    // 앱으로 돌아올 때마다 새 버전이 있는지 확인한다
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && pwa.reg) pwa.reg.update().catch(function () { /* 무시 */ });
+    });
   }
 })();
