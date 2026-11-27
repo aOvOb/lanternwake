@@ -863,6 +863,8 @@
     nickOpen = false;
     nickForm.style.display = 'none';
     try { nickIn.blur(); } catch (e) { /* 무시 */ }
+    // iOS 는 키보드가 닫힌 뒤에도 화면이 밀린 채 남을 수 있어 위치와 캔버스 크기를 다시 맞춘다(실기기 확인 필요)
+    try { window.scrollTo(0, 0); LW.platform.resize(); } catch (e) { /* 무시 */ }
     LW.input.onOverlayOpen();
   };
   if (nickForm) {
