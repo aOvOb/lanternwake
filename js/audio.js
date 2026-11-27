@@ -2,7 +2,7 @@
 (function () {
   function nop() {}
   LW.audio = {
-    init: nop, suspend: nop, resume: nop,
+    init: nop, applySettings: nop, suspend: nop, resume: nop,
     hit: nop, gem: nop, levelup: nop, hurt: nop, chest: nop,
     bossWarn: nop, win: nop, lose: nop, start: nop, pickup: nop, candle: nop,
     vibrate: function (ms) {

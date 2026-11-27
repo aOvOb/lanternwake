@@ -29,4 +29,28 @@
   };
   LW.settings = LW.storage.loadSettings();
   LW.records = LW.storage.loadRecords();
+
+  // 설정을 바꾼 뒤 저장한다
+  LW.saveSettings = function () { LW.storage.saveSettings(LW.settings); };
+
+  // 진행 중인 판의 최고 기록(시간, 처치, 레벨)만 갱신해 저장한다. 백그라운드 전환 때 부른다(강제 종료 대비).
+  // 판 수, 승리 수는 올리지 않는다. 바뀐 것이 있으면 true.
+  LW.commitProgress = function (g) {
+    var r = LW.records, t = Math.floor(g.time), ch = false;
+    if (t > r.bestTime) { r.bestTime = t; ch = true; }
+    if (g.kills > r.bestKills) { r.bestKills = g.kills; ch = true; }
+    if (g.level > r.bestLevel) { r.bestLevel = g.level; ch = true; }
+    if (ch) LW.storage.saveRecords(r);
+    return ch;
+  };
+
+  // 판이 끝났을 때: 최고 기록과 판 수, 승리 수, 완전한 새벽 수를 저장한다
+  LW.finishRun = function (g, won, full) {
+    var r = LW.records;
+    LW.commitProgress(g);
+    r.runs++;
+    if (won) r.wins++;
+    if (full) r.fullDawns++;
+    LW.storage.saveRecords(r);
+  };
 })();

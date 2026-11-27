@@ -814,9 +814,9 @@
     ctx.setTransform(k, 0, 0, k, v.offX * v.dprUsed, v.offY * v.dprUsed);
     if (v.letterbox) { ctx.save(); ctx.beginPath(); ctx.rect(0, 0, v.w, v.h); ctx.clip(); }
 
-    if (g.state === 'TITLE') {
+    if (g.state === 'TITLE' || (g.state === 'SETTINGS' && LW.ui.settingsFrom === 'TITLE')) {
       R.cam.x = 0; R.cam.y = 0;
-      LW.ui.drawTitle(ctx);
+      LW.ui.drawTitleScene(ctx, g);
     } else {
       R.cam.x = P.x; R.cam.y = P.y;
       drawWorld(ctx, g);

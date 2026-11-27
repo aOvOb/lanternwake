@@ -8,7 +8,10 @@
     weapons: [], passives: [], chestN: 0, chestB: 0, chestsOpened: 0, bossesSeen: [], bannerText: '', bannerT: 0, dmgBySlot: new Float64Array(LW.WEAPON_SLOTS),
     god: false, won: false,
     mapStats: { candleSpawned: 0, candleBroken: 0, candleMax: 0, oil: 0, bell: 0, light: 0, purified: 0 },
-    toastText: '', toastT: 0, flashT: 0
+    toastText: '', toastT: 0, flashT: 0,
+    full: false, lastBossKilled: false,
+    prevBest: { time: 0, kills: 0, level: 0, runs: 0 },
+    newBest: { time: false, kills: false, level: false }
   };
   var perf = LW.perf = {
     updSum: 0, updN: 0, rndSum: 0, rndN: 0, updLast: 0, rndLast: 0, fps: 60, maxEnemies: 0, maxNormal: 0
@@ -23,7 +26,8 @@
     if (prev === 'PLAYING') LW.input.releaseJoy();
     // 화면 꺼짐 방지는 진행 중인 상태(레벨업, 상자 포함)에서 유지한다
     LW.platform.wakeLock(s === 'PLAYING' || s === 'LEVELUP' || s === 'CHEST');
-    if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE') LW.input.onOverlayOpen();
+    if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE' || s === 'SETTINGS') LW.input.onOverlayOpen();
+    LW.ui.onState(s);
   };
 
   // 새 판 시작: 모든 풀과 상태를 처음으로 돌린다
@@ -35,7 +39,9 @@
     g.passives = [];
     g.chestN = 0; g.chestB = 0; g.chestsOpened = 0;
     g.bossesSeen = []; g.bannerT = 0; g.bossKilled = 0;
-    g.toastT = 0; g.flashT = 0;
+    g.toastT = 0; g.flashT = 0; g.full = false; g.lastBossKilled = false;
+    var rc = LW.records, pb = g.prevBest;
+    pb.time = rc.bestTime; pb.kills = rc.bestKills; pb.level = rc.bestLevel; pb.runs = rc.runs;
     var ms = g.mapStats;
     ms.candleSpawned = 0; ms.candleBroken = 0; ms.candleMax = 0; ms.oil = 0; ms.bell = 0; ms.light = 0; ms.purified = 0;
     LW.enemies.reset(); LW.projectiles.reset(); LW.areas.reset(); LW.ebullets.reset();
@@ -71,8 +77,30 @@
   // 상자를 받는다. 실제로 여는 것은 갱신 11단계다.
   g.giveChest = function (boss) { if (boss) g.chestB++; else g.chestN++; };
 
+  // 15:00 승리 연출: 시야 안 적이 흩어지며 사라지고, 남은 적과 탄은 지운다
+  function vanishAll() {
+    var v = LW.view, P = LW.player, items = LW.enemies.items, n = LW.enemies.n;
+    for (var i = 0; i < n; i++) {
+      var e = items[i];
+      if (!e.active || Math.abs(e.x - P.x) > v.w / 2 || Math.abs(e.y - P.y) > v.h / 2) continue;
+      LW.effects.burst(e.x, e.y, 2, 0);
+    }
+    LW.enemies.reset(); LW.ebullets.reset(); LW.areas.reset(); LW.projectiles.reset();
+  }
+
+  // 판 종료. 승리는 15:00 생존이고, 14:00 보스를 처치했으면 "완전한 새벽"이다.
   g.end = function (won) {
     g.won = !!won;
+    g.full = g.won && g.lastBossKilled;
+    var pb = g.prevBest, nb = g.newBest, t = Math.floor(g.time);
+    // 첫 판은 비교할 이전 기록이 없어 갱신 표시를 하지 않는다
+    nb.time = pb.runs > 0 && t > pb.time;
+    nb.kills = pb.runs > 0 && g.kills > pb.kills;
+    nb.level = pb.runs > 0 && g.level > pb.level;
+    LW.finishRun(g, g.won, g.full);
+    LW.ui.refreshBest();
+    if (g.won) vanishAll();
+    LW.ui.buildResult(g);
     LW.audio[won ? 'win' : 'lose']();
     g.setState('RESULT');
   };
@@ -80,6 +108,7 @@
   g.onHidden = function () {
     if (g.state === 'PLAYING') g.setState('PAUSED');
     LW.audio.suspend();
+    LW.commitProgress(g);
     LW.platform.wakeLock(false);
     LW.input.resetPointers();
   };

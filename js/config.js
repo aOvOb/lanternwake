@@ -19,6 +19,12 @@ window.LW = window.LW || {};
     elite: q.get('elite') === '1',
     candle: q.get('candle') === '1',
     snapChest: q.get('snapchest') === '1',
+    // 자동 검사: rounds=N 연속 N판(사망 후 다시 하기), dieAt=초 각 판을 그 시각에 강제로 사망시킴,
+    // snapstate=TITLE|RESULT|PAUSED|SETTINGS 그 화면에서 스냅샷
+    rounds: Math.max(0, Math.floor(Number(q.get('rounds')) || 0)),
+    killLast: q.get('killlast') === '1',
+    dieAt: Math.max(0, Number(q.get('dieat')) || 0),
+    snapState: q.get('snapstate') || '',
     build: q.get('build') || '',
     start: Math.max(0, Number(q.get('start')) || 0),
     snap: (q.get('snap') || '').split(',').map(Number).filter(function (v) { return v > 0; })

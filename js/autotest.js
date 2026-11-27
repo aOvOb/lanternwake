@@ -2,6 +2,9 @@
 // 오류를 모으고, 플레이어를 자동으로 움직이고, N초가 지나면 결과 JSON을 <pre id="autotest">에 쓴다.
 // 결과 JSON: ok는 "수집된 오류가 없음", reached는 "목표 시각에 도달했거나 승리", died는 "사망으로 끝남"이다.
 // 보조 옵션: &start=초(그 시각부터 시작, N은 그 뒤로 더 돌 시간), &build=all|alt(시작 빌드와 자동 레벨업),
+//           &rounds=N(연속 N판, 사망하면 다시 하기), &dieat=초(각 판을 그 시각에 사망시킴),
+//           &snapstate=TITLE|RESULT|PAUSED|SETTINGS(그 화면이 그려진 뒤 스냅샷),
+//           &killlast=1(마지막 그림자 HP를 1로),
 //           &god=1(무적), &elite=1(15초마다 엘리트), &candle=1(6초마다 가까운 촛대), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
 (function () {
   var N = LW.params.autotest;
@@ -56,6 +59,26 @@
   };
   var buildCfg = BUILDS[LW.params.build] || null;
   var stepT = 0, stepRR = 0;
+
+  // 연속 판 검사: 판이 시작된 직후의 풀 활성 수와 상태를 기록해 초기화가 됐는지 본다
+  var ROUNDS = LW.params.rounds, roundNo = 1, roundT = 0, roundsDone = 0, resultAt = 0, titleAt = 0, sceneAt = 0, scene = 0;
+  at.roundStarts = [];
+  at.roundEnds = [];
+  // 판이 끝난 시점의 상태(재시작 전에 풀에 무엇이 남아 있었는지 보여 준다)
+  function endNote(g) {
+    return { time: r2(g.time), kills: g.kills, died: !g.won, level: g.level, enemies: LW.enemies.n, projectiles: LW.projectiles.n,
+      areas: LW.areas.n, gems: LW.gems.n, pickups: LW.pickups.n, particles: LW.particles.n };
+  }
+  function noteRoundStart(g) {
+    at.roundStarts.push({
+      enemies: LW.enemies.n, projectiles: LW.projectiles.n, areas: LW.areas.n, ebullets: LW.ebullets.n,
+      gems: LW.gems.n, pickups: LW.pickups.n, particles: LW.particles.n, dmgNums: LW.dmgNums.n,
+      hp: LW.player.hp, maxHp: LW.player.maxHp, time: g.time, level: g.level, kills: g.kills, pending: g.pending,
+      weapons: g.weapons.length, passives: g.passives.length, evolved: g.weapons.some(function (w) { return w.evolved; }),
+      candles: LW.pickups.nCandle, boss: !!LW.enemies.boss, won: g.won, toast: g.toastT, mapItems: g.mapStats.candleSpawned
+    });
+    roundT = 0;
+  }
 
   // 새 판이 시작된 직후 한 번 호출: 시간 건너뛰기와 시작 빌드
   at.setup = function (g) {
@@ -140,9 +163,42 @@
     if (at.done) return;
     var g = LW.game;
     if (!g) return;
+    var now = performance.now(), sst = LW.params.snapState;
     if (g.state === 'TITLE') {
+      // snapstate=TITLE이면 타이틀이 그려진 뒤 첫 스냅샷을 찍고 시작한다
+      if (sst === 'TITLE' && snapIdx < snaps.length) {
+        if (!titleAt) titleAt = now;
+        if (now - titleAt < 700) return;
+        takeSnap(snaps[snapIdx++]);
+      }
       g.start();
       at.setup(g);
+      noteRoundStart(g);
+    } else if (g.state === 'RESULT') {
+      if (!resultAt) resultAt = now;
+      var rage = now - resultAt;
+      if (sst === 'RESULT' && snapIdx < snaps.length && rage >= 500) takeSnap(snaps[snapIdx++]);
+      var more = ROUNDS > 0 && roundNo < ROUNDS;
+      if (rage >= 1200 && more) {
+        at.roundEnds.push(endNote(g));
+        roundsDone = roundNo; roundNo++; resultAt = 0;
+        LW.ui.act('retry');            // 결과 화면의 "다시 하기" 버튼과 같은 경로
+        at.setup(g);
+        noteRoundStart(g);
+      } else if (!more && (sst !== 'RESULT' || snapIdx >= snaps.length) && rage >= 100) {
+        if (ROUNDS > 0) { at.roundEnds.push(endNote(g)); roundsDone = roundNo; }
+        at.finish();
+      }
+      return;
+    } else if (g.state === 'PAUSED' || g.state === 'SETTINGS') {
+      // 화면 스냅샷 시나리오: 일시정지와 설정을 연 뒤 찍고 되돌린다
+      if (!sceneAt) sceneAt = now;
+      if (now - sceneAt >= 500 && snapIdx < snaps.length) {
+        takeSnap(snaps[snapIdx++]);
+        if (sst === 'PAUSED' || scene === 1) { LW.ui.act(g.state === 'SETTINGS' ? 'back' : 'resume'); }
+        else { scene = 1; LW.ui.act('settings'); sceneAt = 0; }
+      }
+      return;
     } else if (g.state === 'LEVELUP') {
       if (performance.now() - LW.levelup.openedAt >= 500) LW.levelup.choose(0);
     } else if (g.state === 'CHEST') {
@@ -151,15 +207,31 @@
       if (age >= 150 && snapIdx < snaps.length && (LW.params.snapChest || g.time >= snaps[snapIdx])) takeSnap(snaps[snapIdx++]);
       if (age >= 500) LW.chest.close();
     }
-    if (g.state === 'PLAYING' && !LW.params.snapChest) {
+    if (g.state === 'PLAYING' && !LW.params.snapChest && sst !== 'RESULT' && sst !== 'PAUSED' && sst !== 'SETTINGS' && sst !== 'TITLE') {
       while (snapIdx < snaps.length && g.time >= snaps[snapIdx]) takeSnap(snaps[snapIdx++]);
     }
-    if (g.time >= at.endTime || g.state === 'RESULT') at.finish();
+    // 일시정지, 설정 화면 스냅샷: 스냅샷 시각이 되면 일시정지를 연다
+    if (g.state === 'PLAYING' && (sst === 'PAUSED' || sst === 'SETTINGS') && snapIdx < snaps.length && g.time >= snaps[snapIdx]) {
+      sceneAt = 0; scene = sst === 'SETTINGS' ? 0 : 1;
+      LW.ui.act('pause');
+      if (sst === 'SETTINGS') LW.ui.act('settings');
+    }
+    // 연속 판 검사는 마지막 판의 결과 화면에서 끝낸다. 그 밖에는 목표 시각에 끝낸다.
+    if (ROUNDS === 0 && g.time >= at.endTime) at.finish();
   };
 
   // 프레임이 아니라 게임 시간 1스텝마다 호출(game.update에서)
-  at.step = function (dt) { buildStep(LW.game, dt); eliteStep(LW.game, dt); candleStep(LW.game, dt); };
+  at.step = function (dt) {
+    buildStep(LW.game, dt); eliteStep(LW.game, dt); candleStep(LW.game, dt);
+    // dieat: 판이 이 시각이 되면 HP를 0으로 만든다. 실제 사망 경로(game.update의 hp 검사)를 그대로 탄다.
+    roundT += dt;
+    // killlast=1: 마지막 그림자의 HP를 1로 만들어 처치 경로("완전한 새벽")를 검사한다
+    var bs = LW.enemies.boss;
+    if (LW.params.killLast && bs && bs.active && bs.def.id === 'last' && bs.hp > 1) bs.hp = 1;
+    if (LW.params.dieAt > 0 && roundT >= LW.params.dieAt) { LW.game.god = false; LW.player.hp = 0; }
+  };
 
+  function r2(v) { return Math.round(v * 100) / 100; }
   function round(v, k) { var m = Math.pow(10, k); return Math.round(v * m) / m; }
 
   at.finish = function (extraError) {
@@ -170,7 +242,7 @@
     var p = LW.perf || {};
     var res = {
       ok: at.errors.length === 0,
-      reached: !!g.won || (g.time || 0) >= at.endTime - 1e-6,
+      reached: ROUNDS > 0 ? roundsDone >= ROUNDS : (!!g.won || (g.time || 0) >= at.endTime - 1e-6),
       died: g.state === 'RESULT' && !g.won,
       errors: at.errors,
       gameTime: round(g.time || 0, 2),
@@ -193,6 +265,13 @@
       maxNormal: p.maxNormal || 0,
       chestsOpened: g.chestsOpened || 0,
       mapItems: g.mapStats || {},
+      rounds: ROUNDS,
+      roundsDone: roundsDone,
+      roundStarts: at.roundStarts,
+      roundEnds: at.roundEnds,
+      records: LW.records,
+      full: !!g.full,
+      lastBossKilled: !!g.lastBossKilled,
       snaps: at.snapsTaken
     };
     var pre = document.createElement('pre');

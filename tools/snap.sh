@@ -3,6 +3,7 @@
 # 사용법: tools/snap.sh <게임 초 목록, 쉼표 구분> <출력 폴더>
 # 예: SNAP_QUERY="&build=all&start=280&god=1" tools/snap.sh 285,300 /tmp/out
 # 추가 주소 매개변수는 환경 변수 SNAP_QUERY로 넘긴다. start가 있으면 그 시각부터 시작한다.
+# 창 크기는 SNAP_WINDOW(기본 412,915)로 바꾼다. 가로 화면 확인은 SNAP_WINDOW=915,412.
 SECS_LIST="$1"
 OUT="$2"
 if [ -z "$SECS_LIST" ] || [ -z "$OUT" ]; then
@@ -41,7 +42,7 @@ for _ in $(seq 1 30); do
 done
 
 "$CHROME" --headless=new --disable-gpu \
-  --user-data-dir="$TMP/profile" --window-size=412,915 \
+  --user-data-dir="$TMP/profile" --window-size=${SNAP_WINDOW:-412,915} \
   --virtual-time-budget="$BUDGET" --dump-dom \
   "http://127.0.0.1:$PORT/index.html?autotest=$SECS&nosw=1&snap=$SECS_LIST$SNAP_QUERY" \
   >"$TMP/dom.html" 2>/dev/null

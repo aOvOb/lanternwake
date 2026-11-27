@@ -86,6 +86,13 @@
   }
 
   // ===== 레이아웃 =====
+  // 설정 버튼 라벨은 상수로 두어 프레임마다 문자열을 만들지 않는다
+  var L_SOUND = ['소리: 꺼짐', '소리: 켜짐'], L_VIB = ['진동: 꺼짐', '진동: 켜짐'], L_DMG = ['데미지 숫자: 꺼짐', '데미지 숫자: 켜짐'];
+  var L_Q = { auto: '화질: 자동', high: '화질: 높음', low: '화질: 낮음' };
+  var confirmTitle = false;               // 일시정지에서 "타이틀로"를 한 번 눌렀는지
+  ui.settingsFrom = 'TITLE';              // 설정 화면을 연 곳(TITLE 또는 PAUSED)
+  ui.bestStr = '';                        // 타이틀의 최고 기록 한 줄
+  ui.onState = function () { confirmTitle = false; };
   var cardN = 0;
   ui.layout = function () {
     var g = LW.game, v = LW.view, s = LW.safe;
@@ -101,13 +108,33 @@
         addBtn('d_lvl', v.w - s.r - 8 - ds, s.t + 14 + bs + 8 + (ds + 6), ds, ds, 'LV', 2);
         addBtn('d_ovl', v.w - s.r - 8 - ds, s.t + 14 + bs + 8 + (ds + 6) * 2, ds, ds, 'F2', 2);
       }
+    } else if (st === 'TITLE') {
+      var th = Math.max(MIN, 44), tcx = v.portrait ? v.w / 2 : v.w * 0.7;
+      addBtn('settings', tcx - 60, v.h - s.b - 16 - th, 120, th, '설정', 3);
     } else if (st === 'PAUSED') {
-      var bh = Math.max(MIN, 52);
-      addBtn('resume', v.w / 2 - 100, v.h / 2 - bh / 2, 200, bh, '계속', 3);
+      var bh = Math.max(MIN, 52), y1 = v.h / 2 - bh * 1.5 - 12;
+      addBtn('resume', v.w / 2 - 110, y1, 220, bh, '계속', 3);
+      addBtn('settings', v.w / 2 - 110, y1 + bh + 12, 220, bh, '설정', 3);
+      addBtn('title', v.w / 2 - 110, y1 + (bh + 12) * 2, 220, bh, confirmTitle ? '정말 나갈까요? 한 번 더' : '타이틀로', 3);
+    } else if (st === 'SETTINGS') {
+      var sh = Math.max(MIN, 48), sy = v.h / 2 - (sh * 5 + 14 * 4) / 2 + 20;
+      var cfg = LW.settings;
+      addBtn('set_sound', v.w / 2 - 120, sy, 240, sh, L_SOUND[cfg.sound ? 1 : 0], 3);
+      addBtn('set_vib', v.w / 2 - 120, sy + (sh + 14), 240, sh, L_VIB[cfg.vibrate ? 1 : 0], 3);
+      addBtn('set_dmg', v.w / 2 - 120, sy + (sh + 14) * 2, 240, sh, L_DMG[cfg.dmgNumbers ? 1 : 0], 3);
+      addBtn('set_q', v.w / 2 - 120, sy + (sh + 14) * 3, 240, sh, L_Q[cfg.quality] || L_Q.auto, 3);
+      addBtn('back', v.w / 2 - 120, sy + (sh + 14) * 4, 240, sh, '뒤로', 3);
     } else if (st === 'RESULT') {
       var rh = Math.max(MIN, 52);
-      addBtn('retry', v.w / 2 - 100, v.h * 0.62, 200, rh, '다시 하기', 3);
-      addBtn('title', v.w / 2 - 100, v.h * 0.62 + rh + 12, 200, rh, '타이틀', 3);
+      if (v.portrait) {
+        var ry = v.h - s.b - 20 - rh * 2 - 12;
+        addBtn('retry', v.w / 2 - 100, ry, 200, rh, '다시 하기', 3);
+        addBtn('title', v.w / 2 - 100, ry + rh + 12, 200, rh, '타이틀', 3);
+      } else {
+        var ry2 = v.h - s.b - 16 - rh, cx2 = v.w * 0.22;
+        addBtn('retry', cx2 - 155, ry2, 150, rh, '다시 하기', 3);
+        addBtn('title', cx2 + 5, ry2, 150, rh, '타이틀', 3);
+      }
     } else if (st === 'CHEST') {
       addBtn('chest_ok', 0, 0, v.w, v.h, '', 5);
     } else if (st === 'LEVELUP') {
@@ -131,12 +158,31 @@
 
   // ===== 입력 처리 =====
   ui.act = function (id) {
-    var g = LW.game;
+    var g = LW.game, cfg = LW.settings;
     switch (id) {
       case 'pause': g.setState('PAUSED'); break;
       case 'resume': g.setState('PLAYING'); break;
       case 'retry': g.start(); break;
-      case 'title': g.setState('TITLE'); break;
+      case 'title':
+        if (g.state === 'PAUSED') {
+          // 한 번 더 눌러야 나간다. 나가기 전에 진행 중인 기록을 저장한다.
+          if (!confirmTitle) { confirmTitle = true; break; }
+          LW.commitProgress(g);
+          ui.refreshBest();
+        }
+        g.setState('TITLE');
+        break;
+      case 'settings': ui.settingsFrom = g.state === 'PAUSED' ? 'PAUSED' : 'TITLE'; g.setState('SETTINGS'); break;
+      case 'back': g.setState(ui.settingsFrom); break;
+      case 'set_sound': cfg.sound = !cfg.sound; LW.saveSettings(); LW.audio.applySettings(); break;
+      case 'set_vib': cfg.vibrate = !cfg.vibrate; LW.saveSettings(); LW.audio.vibrate(30); break;
+      case 'set_dmg': cfg.dmgNumbers = !cfg.dmgNumbers; LW.saveSettings(); LW.quality.apply(LW.quality.level); break;
+      case 'set_q':
+        cfg.quality = cfg.quality === 'auto' ? 'high' : (cfg.quality === 'high' ? 'low' : 'auto');
+        LW.saveSettings();
+        LW.quality.reset();
+        LW.platform.resize();
+        break;
       case 'c0': LW.levelup.choose(0); break;
       case 'c1': LW.levelup.choose(1); break;
       case 'c2': LW.levelup.choose(2); break;
@@ -144,6 +190,36 @@
       case 'd_time': g.time += 60; break;
       case 'd_lvl': g.addXp(g.xpNeed - g.xp); break;
       case 'd_ovl': ui.dbgOverlay = !ui.dbgOverlay; break;
+    }
+  };
+
+  // 타이틀의 최고 기록 한 줄을 다시 만든다(저장된 기록이 바뀔 때만 부른다)
+  ui.refreshBest = function () {
+    var r = LW.records;
+    ui.bestStr = r.runs > 0 || r.bestTime > 0
+      ? '최고 기록  ' + LW.fmtTime(r.bestTime) + '   처치 ' + r.bestKills + '   레벨 ' + r.bestLevel + (r.wins > 0 ? '   승리 ' + r.wins : '')
+      : '';
+  };
+
+  // 결과 화면에 보일 문자열과 무기별 누적 피해 줄을 판이 끝날 때 한 번 만든다
+  var res = ui.res = { head: '', sub: '', stat: '', best: '', rows: [], total: 0 };
+  ui.buildResult = function (g) {
+    var won = g.won;
+    res.head = won ? (g.full ? '완전한 새벽' : '새벽이 밝았다') : '등불이 꺼졌다';
+    res.sub = won && g.full ? '마지막 그림자를 쓰러뜨렸다' : '';
+    res.stat = '생존 ' + LW.fmtTime(g.time) + '   레벨 ' + g.level + '   처치 ' + g.kills;
+    var nb = g.newBest, parts = '';
+    if (nb.time) parts += '시간';
+    if (nb.kills) parts += (parts ? ', ' : '') + '처치';
+    if (nb.level) parts += (parts ? ', ' : '') + '레벨';
+    res.best = parts ? '최고 기록 갱신: ' + parts : '';
+    res.rows.length = 0;
+    var max = 1, i;
+    res.total = 0;
+    for (i = 0; i < g.weapons.length; i++) { if (g.dmgBySlot[i] > max) max = g.dmgBySlot[i]; res.total += g.dmgBySlot[i]; }
+    for (i = 0; i < g.weapons.length; i++) {
+      var w = g.weapons[i], d = Math.round(g.dmgBySlot[i]);
+      res.rows.push({ name: LW.weaponName(w) + ' Lv' + w.lv, color: LW.weaponColor(w), str: String(d), ratio: g.dmgBySlot[i] / max });
     }
   };
 
@@ -178,8 +254,14 @@
   function handleKey(code) {
     var g = LW.game, st = g.state, lu = LW.levelup;
     if (LW.params.debug && code === 'F2') { ui.dbgOverlay = !ui.dbgOverlay; return; }
+    if (code === 'KeyM' && st !== 'LEVELUP' && st !== 'CHEST') {
+      LW.settings.sound = !LW.settings.sound; LW.saveSettings(); LW.audio.applySettings();
+      return;
+    }
     if (st === 'TITLE') {
       if (code === 'Enter' || code === 'Space') g.start();
+    } else if (st === 'SETTINGS') {
+      if (code === 'Escape' || code === 'Backspace') ui.act('back');
     } else if (st === 'PLAYING') {
       if (code === 'Escape' || code === 'KeyP') g.setState('PAUSED');
       else if (LW.params.debug) {
@@ -446,64 +528,119 @@
     LW.drawOwl(ctx, cx, cy, size / 30, { facing: 0, bob: bob, flame: flame, blink: blink });
   }
 
-  // 타이틀 임시본. 완성본은 S10에서 다듬는다.
-  ui.drawTitle = function (ctx) {
-    curFont = '';
+  // ===== 타이틀 =====
+  // 불꽃 크기는 0.1초마다 목표값(+-6%)을 새로 고르고 보간한다. 눈은 3~5초마다 0.12초 감는다.
+  var tl = { flame: 1, target: 1, nextT: 0, lastT: 0, blinkAt: -1 };
+  var VERSION_STR = 'v' + LW.VERSION;
+  function titleScene(ctx, g) {
     var v = LW.view, s = LW.safe, R = LW.render;
     var t = performance.now() / 1000;
+    var dt = t - tl.lastT; tl.lastT = t;
+    if (dt > 0.2) dt = 0.2;
+    if (t >= tl.nextT) { tl.target = 1 + (LW.fxRand() * 2 - 1) * 0.06; tl.nextT = t + 0.1; }
+    tl.flame += (tl.target - tl.flame) * Math.min(1, dt * 20);
+    if (tl.blinkAt < 0) tl.blinkAt = t + 3;
+    else if (t >= tl.blinkAt + 0.12) tl.blinkAt = t + 3 + LW.fxRand() * 2;
+    var blink = t >= tl.blinkAt && t < tl.blinkAt + 0.12 ? 1 : 0;
+    var bob = Math.sin(t * Math.PI) * 2;        // 2초 주기, 2 단위
+
     ctx.fillStyle = R.bgPat;
     ctx.fillRect(0, 0, v.w, v.h);
     dim(ctx, 0.5);
-    var short = Math.min(v.w, v.h);
-    var size = short * 0.35;
+    var size = Math.min(v.w, v.h) * 0.35;
     var ox, oy, tx, ty;
     if (v.portrait) { ox = v.w / 2; oy = v.h * 0.2; tx = v.w / 2; ty = v.h * 0.42; }
-    else { ox = v.w * 0.25; oy = v.h / 2; tx = v.w * 0.7; ty = v.h * 0.32; }
-    var flick = 1 + 0.06 * Math.sin(t * 15 + Math.sin(t * 5) * 2);
-    var blink = (t % 4) < 0.12 ? 1 : 0;
-    var bob = Math.sin(t * Math.PI) * 2;
+    else { ox = v.w * 0.25; oy = v.h / 2; tx = v.w * 0.7; ty = v.h * 0.28; }
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = 0.7;
     ctx.drawImage(R.glow, ox - size * 1.3, oy + size * 0.2 - size * 1.3, size * 2.6, size * 2.6);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    drawOwlBig(ctx, ox, oy, size, flick, blink, bob);
+    drawOwlBig(ctx, ox, oy, size, tl.flame, blink, bob);
     text(ctx, 'Lanternwake', tx, ty, 38, '#ffe9a8');
     text(ctx, '등불지기', tx, ty + 36, 22, '#ffffff');
     ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t * 2.5));
-    text(ctx, '탭하여 시작', tx, ty + 90, 20, '#ffd34d');
+    text(ctx, '탭하여 시작', tx, ty + 88, 20, '#ffd34d');
     ctx.globalAlpha = 1;
-    text(ctx, '터치: 화면을 누르고 끌어 이동', tx, ty + 130, 13, '#c9d6da', 'center', 'normal');
-    text(ctx, '키보드: WASD 또는 방향키, Enter 시작', tx, ty + 150, 13, '#c9d6da', 'center', 'normal');
-    text(ctx, 'v' + LW.VERSION, v.w - s.r - 8, v.h - s.b - 10, 11, '#8aa0a6', 'right', 'normal');
+    if (ui.bestStr) text(ctx, ui.bestStr, tx, ty + 122, 14, '#ffe9a8', 'center', 'normal');
+    text(ctx, '터치: 화면을 누르고 끌어 이동', tx, ty + 154, 13, '#c9d6da', 'center', 'normal');
+    text(ctx, '키보드: WASD 또는 방향키, Enter 시작, M 소리', tx, ty + 174, 13, '#c9d6da', 'center', 'normal');
+    text(ctx, VERSION_STR, v.w - s.r - 8, v.h - s.b - 10, 11, '#8aa0a6', 'right', 'normal');
+  }
+
+  // 타이틀 화면(설정을 타이틀에서 열었을 때는 설정도 이 위에 그린다)
+  ui.drawTitleScene = function (ctx, g) {
+    curFont = '';
+    ui.layout();
+    titleScene(ctx, g);
+    if (g.state === 'TITLE') drawButton(ctx, btns[0], 0);
+    else drawSettings(ctx);
   };
+
+  function drawSettings(ctx) {
+    var v = LW.view;
+    dim(ctx, 0.78);
+    text(ctx, '설정', v.w / 2, btns[0].y - 38, 28, '#ffe9a8');
+    for (var i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
+  }
+
+  // ===== 결과 =====
+  function drawResult(ctx, g) {
+    var v = LW.view, s = LW.safe, i, n = res.rows.length, won = g.won;
+    dim(ctx, 0.85);
+    var cx, owlY, owlSize = Math.min(v.w, v.h) * (v.portrait ? 0.24 : 0.3);
+    var hy, listX, listY, listW;
+    if (v.portrait) {
+      cx = v.w / 2; owlY = v.h * 0.14; hy = v.h * 0.27;
+      listW = Math.min(v.w - 48, 360); listX = (v.w - listW) / 2; listY = v.h * 0.43;
+    } else {
+      cx = v.w * 0.22; owlY = v.h * 0.26; hy = v.h * 0.5;
+      listW = Math.min(300, v.w * 0.42); listX = v.w * 0.5; listY = Math.max(s.t + 56, v.h * 0.2);
+    }
+    // 승리면 불꽃이 밝고, 패배면 꺼진 등불
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = won ? 0.6 : 0.12;
+    ctx.drawImage(LW.render.glow, cx - owlSize * 1.2, owlY + owlSize * 0.2 - owlSize * 1.2, owlSize * 2.4, owlSize * 2.4);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    drawOwlBig(ctx, cx, owlY, owlSize, won ? 1 : 0, 0, 0);
+    text(ctx, res.head, cx, hy, 30, won ? (g.full ? '#fff0b0' : '#ffe9a8') : '#c9d6da');
+    var ly = hy + 34;
+    if (res.sub) { text(ctx, res.sub, cx, ly, 14, '#ffd34d', 'center', 'normal'); ly += 24; }
+    text(ctx, res.stat, cx, ly, 16, '#ffffff');
+    if (res.best) text(ctx, res.best, cx, ly + 28, 15, '#7be38d');
+    // 무기별 누적 피해
+    text(ctx, '무기별 누적 피해', listX + listW / 2, listY - 22, 14, '#ffe9a8');
+    for (i = 0; i < n; i++) {
+      var r = res.rows[i], ry = listY + i * 30;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(listX, ry + 16, listW, 5);
+      ctx.fillStyle = r.color;
+      ctx.fillRect(listX, ry + 16, listW * r.ratio, 5);
+      text(ctx, r.name, listX, ry + 6, 13, '#ffffff', 'left', 'normal');
+      text(ctx, r.str, listX + listW, ry + 6, 13, '#ffe9a8', 'right');
+    }
+    for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
+  }
 
   ui.draw = function (ctx, g) {
     curFont = '';
     ui.layout();
     var v = LW.view, i, st = g.state;
-    drawHud(ctx, g);
-    drawBoss(ctx, g);
-    drawToast(ctx, g);
-    if (st === 'PLAYING') drawJoystick(ctx);
-    for (i = 0; i < nBtn && st !== 'LEVELUP'; i++) {
-      if (btns[i].id === 'resume' || btns[i].id === 'retry' || btns[i].id === 'title' || btns[i].id === 'chest_ok') continue;
-      drawButton(ctx, btns[i], i);
-    }
-    if (st === 'LEVELUP') drawCards(ctx);
+    if (st !== 'RESULT') { drawHud(ctx, g); drawBoss(ctx, g); drawToast(ctx, g); }
+    if (st === 'PLAYING') {
+      drawJoystick(ctx);
+      for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
+    } else if (st === 'LEVELUP') drawCards(ctx);
     else if (st === 'CHEST') drawChest(ctx);
     else if (st === 'PAUSED') {
       dim(ctx, 0.6);
-      text(ctx, '일시정지', v.w / 2, v.h / 2 - 70, 30, '#ffe9a8');
+      text(ctx, '일시정지', v.w / 2, btns[0].y - 40, 30, '#ffe9a8');
       for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
-    } else if (st === 'RESULT') {
-      dim(ctx, 0.7);
-      var won = g.won;
-      text(ctx, won ? '새벽이 밝았다' : '등불이 꺼졌다', v.w / 2, v.h * 0.34 + 0, 30, '#ffe9a8');
-      drawOwlBig(ctx, v.w / 2, v.h * 0.2, Math.min(v.w, v.h) * 0.22, won ? 1 : 0, 0, 0);
-      text(ctx, '생존 ' + LW.fmtTime(g.time) + '   레벨 ' + g.level + '   처치 ' + g.kills, v.w / 2, v.h * 0.34 + 40, 16, '#ffffff');
-      for (i = 0; i < nBtn; i++) drawButton(ctx, btns[i], i);
-    }
+    } else if (st === 'SETTINGS') drawSettings(ctx);
+    else if (st === 'RESULT') drawResult(ctx, g);
     if (ui.dbgOverlay && LW.params.debug) drawDebug(ctx);
   };
+
+  ui.refreshBest();
 })();
