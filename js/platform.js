@@ -24,7 +24,11 @@
     LW.safe.r = Math.max(0, pr - v.offX) / v.scale;
   }
 
-  // 크기, DPR, safe-area, 그리드, 스프라이트 캐시를 다시 계산한다
+  // 마지막으로 만든 백버퍼 크기와 DPR. 같으면 스프라이트와 비네트를 다시 만들지 않는다.
+  var built = { w: 0, h: 0, dpr: 0 };
+
+  // 크기, DPR, safe-area, 그리드, 스프라이트 캐시를 다시 계산한다.
+  // 크기와 DPR이 그대로면 safe-area만 다시 읽는다(새 판 시작이나 중복 이벤트 때 비용을 아낀다).
   LW.platform.resize = function () {
     var v = LW.view;
     var cssW = Math.max(1, window.innerWidth);
@@ -43,12 +47,29 @@
     v.letterbox = v.offX > 1 || v.offY > 1;
     v.dpr = window.devicePixelRatio || 1;
     v.dprUsed = Math.min(v.dpr, LW.quality.dprCap);
+    if (built.w === cssW && built.h === cssH && built.dpr === v.dprUsed) { readSafe(); return; }
+    built.w = cssW; built.h = cssH; built.dpr = v.dprUsed;
     canvas.width = Math.round(cssW * v.dprUsed);
     canvas.height = Math.round(cssH * v.dprUsed);
+    // 표시 크기는 백버퍼와 같은 기준(innerWidth, innerHeight)으로 JS에서 지정한다
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
     readSafe();
     if (LW.grid) LW.grid.resize();
     if (LW.render) LW.render.onResize();
   };
+
+  // 방향 전환 한 번에 resize, orientationchange, visualViewport resize가 연달아 온다.
+  // 다음 프레임에 한 번만 다시 계산하고, 300ms 뒤에 한 번 더 확인한다(safe-area가 늦게 바뀌는 기기 대비).
+  var rzPending = false, rzTimer = 0;
+  function scheduleResize() {
+    if (!rzPending) {
+      rzPending = true;
+      requestAnimationFrame(function () { rzPending = false; LW.platform.resize(); });
+    }
+    clearTimeout(rzTimer);
+    rzTimer = setTimeout(function () { LW.platform.resize(); }, 300);
+  }
 
   // 제스처와 기본 동작 차단
   function prevent(e) { e.preventDefault(); }
@@ -59,9 +80,9 @@
   document.addEventListener('dblclick', prevent, { passive: false });
   document.addEventListener('contextmenu', prevent, { passive: false });
 
-  window.addEventListener('resize', LW.platform.resize);
-  window.addEventListener('orientationchange', LW.platform.resize);
-  if (window.visualViewport) window.visualViewport.addEventListener('resize', LW.platform.resize);
+  window.addEventListener('resize', scheduleResize);
+  window.addEventListener('orientationchange', scheduleResize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', scheduleResize);
 
   // 백그라운드 전환
   document.addEventListener('visibilitychange', function () {
@@ -70,23 +91,29 @@
   });
   window.addEventListener('pagehide', function () { if (LW.game) LW.game.onHidden(); });
 
-  // Wake Lock
-  var lock = null;
+  // Wake Lock: 원하는 상태(want)를 먼저 기록한다. 요청이 끝났을 때 want가 꺼져 있으면 바로 해제한다.
+  var lock = null, want = false, pending = false;
+  function releaseLock() {
+    if (!lock) return;
+    var l = lock;
+    lock = null;
+    try { l.release().catch(function () { /* 무시 */ }); } catch (e) { /* 무시 */ }
+  }
   LW.platform.wakeLock = function (on) {
+    want = !!on;
     try {
-      if (on) {
-        if (lock || !navigator.wakeLock) return;
-        navigator.wakeLock.request('screen').then(function (l) {
-          lock = l;
-          l.addEventListener('release', function () { if (lock === l) lock = null; });
-        }).catch(function () { /* 실패는 무시 */ });
-      } else if (lock) {
-        var l = lock;
-        lock = null;
-        l.release().catch(function () { /* 무시 */ });
-      }
-    } catch (e) { /* 무시 */ }
+      if (!want) { releaseLock(); return; }
+      if (lock || pending || !navigator.wakeLock) return;
+      pending = true;
+      navigator.wakeLock.request('screen').then(function (l) {
+        pending = false;
+        if (!want) { try { l.release().catch(function () { /* 무시 */ }); } catch (e) { /* 무시 */ } return; }
+        lock = l;
+        l.addEventListener('release', function () { if (lock === l) lock = null; });
+      }).catch(function () { pending = false; /* 실패는 무시 */ });
+    } catch (e) { pending = false; }
   };
+  LW.platform.wakeLockOn = function () { return !!lock; };
 
   // 서비스 워커: 등록은 S13. nosw=1이면 등록된 것을 모두 해제한다.
   if (LW.params.nosw && navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {

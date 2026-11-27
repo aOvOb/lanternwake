@@ -19,7 +19,8 @@
     if (prev === s) return;
     g.state = s;
     if (prev === 'PLAYING') LW.input.releaseJoy();
-    LW.platform.wakeLock(s === 'PLAYING');
+    // 화면 꺼짐 방지는 진행 중인 상태(레벨업, 상자 포함)에서 유지한다
+    LW.platform.wakeLock(s === 'PLAYING' || s === 'LEVELUP' || s === 'CHEST');
     if (s === 'PAUSED' || s === 'RESULT' || s === 'TITLE') LW.input.onOverlayOpen();
   };
 
@@ -72,6 +73,7 @@
     if (g.state === 'PLAYING') g.setState('PAUSED');
     LW.audio.suspend();
     LW.platform.wakeLock(false);
+    LW.input.resetPointers();
   };
   g.onVisible = function () {
     last = performance.now();

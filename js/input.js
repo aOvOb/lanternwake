@@ -59,6 +59,14 @@
     joy.active = false; joy.id = -1; joy.sx = 0; joy.sy = 0;
   };
 
+  // 눌림 상태를 모두 지운다(포커스를 잃거나 화면이 숨겨질 때). 남은 포인터 id가 다음 입력을 막지 않게 한다.
+  inp.resetPointers = function () {
+    nHeld = 0; nIgn = 0;
+    inp.releaseJoy();
+    inp.evN = 0;
+    if (LW.ui) LW.ui.clearPress();
+  };
+
   // 오버레이가 열릴 때: 눌려 있던 포인터를 무시 목록에 넣고 0.4초 잠근다
   inp.onOverlayOpen = function () {
     nIgn = 0;
@@ -95,6 +103,10 @@
   }
   canvas.addEventListener('pointerup', function (e) { up(e, false); });
   canvas.addEventListener('pointercancel', function (e) { up(e, true); });
+  // 캡처가 풀렸는데 up이 오지 않은 포인터는 취소로 처리한다. 이미 처리된 포인터는 무시한다.
+  canvas.addEventListener('lostpointercapture', function (e) {
+    if (has(held, nHeld, e.pointerId) >= 0) up(e, true);
+  });
 
   // 키보드
   var PREVENT = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1, Enter: 1, Escape: 1 };
@@ -108,7 +120,7 @@
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
   window.addEventListener('blur', function () {
     keys = {};
-    inp.releaseJoy();
+    inp.resetPointers();
   });
 
   // 이동 벡터: 자동 검사, 키보드, 조이스틱 순
