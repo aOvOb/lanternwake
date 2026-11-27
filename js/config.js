@@ -22,6 +22,7 @@ window.LW = window.LW || {};
     // 자동 검사: rounds=N 연속 N판(사망 후 다시 하기), dieAt=초 각 판을 그 시각에 강제로 사망시킴,
     // snapstate=TITLE|RESULT|PAUSED|SETTINGS 그 화면에서 스냅샷
     rounds: Math.max(0, Math.floor(Number(q.get('rounds')) || 0)),
+    crowd: q.get('crowd') === '1',
     killLast: q.get('killlast') === '1',
     dieAt: Math.max(0, Number(q.get('dieat')) || 0),
     snapState: q.get('snapstate') || '',
@@ -40,6 +41,8 @@ window.LW = window.LW || {};
     gems: 250, pickups: 20, particles: 150, dmgNums: 40
   };
   LW.ENEMY_CAP = 300;
+  LW.BOSS_RESERVE = 4;      // 풀 끝 몇 칸은 보스 전용(보스가 아닌 스폰은 풀 크기에서 이만큼 뺀 곳까지만)
+  LW.SUMMON_CAP = 24;       // 밤나방 여왕이 소환한 나방의 동시 수 상한
   LW.MAX_ENEMY_R = 40;
 
   // 그리드

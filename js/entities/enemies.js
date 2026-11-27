@@ -6,7 +6,7 @@
     return {
       active: false, uid: 0, def: null, x: 0, y: 0, vx: 0, vy: 0, r: 8,
       hp: 1, maxHp: 1, speed: 0, dmg: 0, xp: 0, elite: false, boss: false, special: false,
-      kbRes: 0, kbX: 0, kbY: 0, slowT: 0, slowMul: 1, freezeT: 0, flashT: 0,
+      summoned: false, kbRes: 0, kbX: 0, kbY: 0, slowT: 0, slowMul: 1, freezeT: 0, flashT: 0,
       aiState: 0, aiT: 0, aiT2: 0, ax: 0, ay: 0, hitCd: new Float32Array(6)
     };
   }
@@ -87,9 +87,12 @@
         e.aiT2 -= dt;
         if (e.aiT2 <= 0) {
           e.aiT2 += 8;
-          for (k = 0; k < 8; k++) {
+          // 살아 있는 소환 나방이 상한(24)이면 더 부르지 않는다
+          var alive = 0, list = LW.enemies.items, cnt = LW.enemies.n;
+          for (k = 0; k < cnt; k++) if (list[k].active && list[k].summoned) alive++;
+          for (k = 0; k < 8 && alive < LW.SUMMON_CAP; k++, alive++) {
             var a = k * TAU / 8, m = LW.enemies.spawnEnemy('moth', e.x + Math.cos(a) * 50, e.y + Math.sin(a) * 50, LW.game.time / 60);
-            if (m) m.special = true;
+            if (m) { m.special = true; m.summoned = true; }
           }
         }
         break;
@@ -108,9 +111,11 @@
   }
 
   // minutes: 경과 분. 시간 보정은 스폰할 때 한 번만 적용한다
-  pool.spawnEnemy = function (defId, x, y, minutes) {
-    var e = pool.spawn();
+  // 보스가 아닌 적은 풀 끝 BOSS_RESERVE칸을 쓰지 않는다. 보스 칸이 찰 일이 없게 하기 위해서다.
+  pool.spawnEnemy = function (defId, x, y, minutes, isBoss) {
+    var e = pool.spawn(isBoss ? undefined : pool.size - LW.BOSS_RESERVE);
     if (!e) return null;
+    e.summoned = false;
     var d = LW.ENEMIES[defId];
     e.def = d; e.uid = ++uidSeq;
     e.x = x; e.y = y; e.vx = 0; e.vy = 0; e.r = d.r;
@@ -145,10 +150,31 @@
     return e;
   };
 
+  // 풀이 가득 찼을 때 보스 자리를 만든다. 일반 적을 먼저, 없으면 보스가 아닌 아무 적을 고른다.
+  function freeFarthest() {
+    var P = LW.player, items = pool.items, n = pool.n, best = -1, bd = -1, bs = false, i;
+    for (i = 0; i < n; i++) {
+      var e = items[i];
+      if (!e.active || e.boss) continue;
+      var dx = e.x - P.x, dy = e.y - P.y, d2 = dx * dx + dy * dy;
+      // 일반 적(special 아님)이 항상 먼저다
+      if (best < 0 || (bs && !e.special) || (bs === e.special && d2 > bd)) { best = i; bd = d2; bs = e.special; }
+    }
+    if (best < 0) return false;
+    items[best].active = false;
+    pool.compact();
+    return true;
+  }
+
   // 보스: 시간 보정 없이 표의 값 그대로. 넉백, 빙결, 끌어당김이 통하지 않고 상한과 무관하다.
   pool.spawnBoss = function (defId, x, y) {
-    var e = pool.spawnEnemy(defId, x, y, 0);
-    if (!e) return null;
+    var e = pool.spawnEnemy(defId, x, y, 0, true);
+    if (!e) {
+      // 예약 칸까지 찼다면 플레이어에서 가장 먼 적 하나를 처치 처리 없이 지우고 그 칸을 쓴다
+      if (!freeFarthest()) return null;
+      e = pool.spawnEnemy(defId, x, y, 0, true);
+      if (!e) return null;
+    }
     e.boss = true; e.special = true; e.xp = 100; e.kbRes = 1;
     pool.boss = e;
     LW.game.bossesSeen.push(defId);

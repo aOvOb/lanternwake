@@ -4,7 +4,7 @@
 // 보조 옵션: &start=초(그 시각부터 시작, N은 그 뒤로 더 돌 시간), &build=all|alt(시작 빌드와 자동 레벨업),
 //           &rounds=N(연속 N판, 사망하면 다시 하기), &dieat=초(각 판을 그 시각에 사망시킴),
 //           &snapstate=TITLE|RESULT|PAUSED|SETTINGS(그 화면이 그려진 뒤 스냅샷),
-//           &killlast=1(마지막 그림자 HP를 1로),
+//           &crowd=1(적 풀을 가득 채움), &killlast=1(마지막 그림자 HP를 1로),
 //           &god=1(무적), &elite=1(15초마다 엘리트), &candle=1(6초마다 가까운 촛대), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
 (function () {
   var N = LW.params.autotest;
@@ -238,6 +238,15 @@
     buildStep(LW.game, dt); eliteStep(LW.game, dt); candleStep(LW.game, dt);
     // dieat: 판이 이 시각이 되면 HP를 0으로 만든다. 실제 사망 경로(game.update의 hp 검사)를 그대로 탄다.
     roundT += dt;
+    // crowd=1: 적 풀을 매 스텝 가득 채운다(special 표시, 상한 무시). 풀이 찬 상태에서 보스가 나오는지 검사한다.
+    if (LW.params.crowd) {
+      var cp = LW.enemies, Pl = LW.player, guard = 0;
+      while (cp.n < cp.size && guard++ < 400) {
+        var ce = cp.spawnEnemy('mite', Pl.x + 380 + (guard % 40) * 5, Pl.y + ((guard * 37) % 300) - 150, 0, true);
+        if (!ce) break;
+        ce.special = true;
+      }
+    }
     // killlast=1: 마지막 그림자의 HP를 1로 만들어 처치 경로("완전한 새벽")를 검사한다
     var bs = LW.enemies.boss;
     if (LW.params.killLast && bs && bs.active && bs.def.id === 'last' && bs.hp > 1) bs.hp = 1;
@@ -278,6 +287,7 @@
       maxNormal: p.maxNormal || 0,
       chestsOpened: g.chestsOpened || 0,
       mapItems: g.mapStats || {},
+      bossActive: !!(LW.enemies.boss && LW.enemies.boss.active),
       audioPlayed: LW.audio.played || 0,
       rounds: ROUNDS,
       roundsDone: roundsDone,
