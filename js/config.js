@@ -13,9 +13,15 @@ window.LW = window.LW || {};
     debug: q.get('debug') === '1',
     stress: q.get('stress') === '1',
     nosw: q.get('nosw') === '1',
-    autotest: Math.max(0, Number(q.get('autotest')) || 0),
+    // bench=초: 실시간 성능 측정(헤드리스 가상 시간에서는 performance.now가 멈춘다).
+    // 자동 검사 장치를 쓰되 rAF로 돌리고, 따로 지정하지 않으면 13:00(start=780) 무적 전체 빌드로 시작한다.
+    // burn=ms는 프레임마다 그만큼 바쁜 루프를 돌려 부하를 주고, ql=0|1|2는 화질 단계를 고정한다(측정 전용).
+    bench: Math.max(0, Number(q.get('bench')) || 0),
+    burn: Math.max(0, Number(q.get('burn')) || 0),
+    ql: q.get('ql') === null ? -1 : Math.max(0, Math.min(2, Math.floor(Number(q.get('ql')) || 0))),
+    autotest: Math.max(0, Number(q.get('autotest')) || Number(q.get('bench')) || 0),
     // 자동 검사 보조 옵션: god=1 무적, build=all|alt 시작 빌드, start=초 시간 건너뛰기, snap=게임 초 목록
-    god: q.get('god') === '1',
+    god: q.get('god') === '1' || Number(q.get('bench')) > 0,
     elite: q.get('elite') === '1',
     candle: q.get('candle') === '1',
     snapChest: q.get('snapchest') === '1',
@@ -26,8 +32,8 @@ window.LW = window.LW || {};
     killLast: q.get('killlast') === '1',
     dieAt: Math.max(0, Number(q.get('dieat')) || 0),
     snapState: q.get('snapstate') || '',
-    build: q.get('build') || '',
-    start: Math.max(0, Number(q.get('start')) || 0),
+    build: q.get('build') || (Number(q.get('bench')) > 0 ? 'all' : ''),
+    start: Math.max(0, q.get('start') === null && Number(q.get('bench')) > 0 ? 780 : Number(q.get('start')) || 0),
     snap: (q.get('snap') || '').split(',').map(Number).filter(function (v) { return v > 0; })
   };
 

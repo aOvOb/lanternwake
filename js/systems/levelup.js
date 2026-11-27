@@ -126,7 +126,8 @@
   // ===== 상자 =====
   // 일반 상자: 진화 가능한 무기가 있으면 그중 하나를 진화, 없으면 보유 항목 하나를 레벨업, 그것도 없으면 HP 30 회복.
   // 보스 상자는 이 판정을 3회 반복한다. 결과는 CHEST 창에 목록으로 보여준다.
-  var chest = LW.chest = { results: [], boss: false, openedAt: 0 };
+  // 결과 칸 3개(보스 상자의 최대 굴림 수)를 미리 만들어 재사용한다. 열 때 객체를 만들지 않는다.
+  var chest = LW.chest = { results: [{ text: '', color: '', evo: false }, { text: '', color: '', evo: false }, { text: '', color: '', evo: false }], n: 0, boss: false, openedAt: 0 };
   var evoBuf = [], itemBuf = [];
 
   function findEvolvable(out) {
@@ -145,6 +146,11 @@
   }
   chest.hasEvolvable = function () { return findEvolvable(evoBuf).length > 0; };
 
+  function addResult(text, color, evo) {
+    var r = chest.results[chest.n++];
+    r.text = text; r.color = color; r.evo = evo;
+  }
+
   function rollOne() {
     var g = LW.game, P = LW.player, i;
     var evs = findEvolvable(evoBuf);
@@ -152,7 +158,7 @@
       var w = evs[(LW.rand() * evs.length) | 0], evo = LW.EVO_BY_WEAPON[w.def.id];
       var from = w.def.name;
       w.evolved = true; w.evo = evo; w.cdT = 0.2; w.stT = 0.2; w.on = false; w.burstLeft = 0; w.volley = 0;
-      chest.results.push({ text: '진화! ' + from + ' → ' + evo.name, color: evo.color, evo: true });
+      addResult('진화! ' + from + ' → ' + evo.name, evo.color, true);
       return;
     }
     itemBuf.length = 0;
@@ -165,17 +171,17 @@
     if (itemBuf.length > 0) {
       var it = itemBuf[(LW.rand() * itemBuf.length) | 0];
       var nm = it.evo ? it.evo.name : it.def.name;
-      chest.results.push({ text: nm + ' Lv ' + it.lv + ' → ' + (it.lv + 1), color: it.def.color, evo: false });
+      addResult(nm + ' Lv ' + it.lv + ' → ' + (it.lv + 1), it.def.color, false);
       it.lv++;
       return;
     }
     P.hp = Math.min(P.maxHp, P.hp + 30);
-    chest.results.push({ text: 'HP 30 회복', color: '#ffd34d', evo: false });
+    addResult('HP 30 회복', '#ffd34d', false);
   }
 
   chest.open = function (boss) {
     var g = LW.game, rolls = boss ? 3 : 1;
-    chest.results.length = 0;
+    chest.n = 0;
     chest.boss = !!boss;
     for (var i = 0; i < rolls; i++) {
       rollOne();

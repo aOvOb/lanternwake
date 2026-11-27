@@ -8,6 +8,8 @@
 //           &god=1(무적), &elite=1(15초마다 엘리트), &candle=1(6초마다 가까운 촛대), &snap=T1,T2(게임 초에 캔버스를 PNG base64로 <pre id="snap-T">에 기록)
 (function () {
   var N = LW.params.autotest;
+  var BENCH = LW.params.bench;
+  var benchPlay = 0, benchLast = 0;   // bench: PLAYING 상태로 흐른 실제 시간(ms)
   var START = LW.params.start;
   var at = LW.autotest = { active: N > 0, done: false, errors: [], seconds: N, angle: 0, endTime: START + N, snapsTaken: [] };
   var dir = { x: 0, y: 0 };
@@ -177,6 +179,11 @@
     var g = LW.game;
     if (!g) return;
     var now = performance.now(), sst = LW.params.snapState;
+    if (BENCH) {
+      if (g.state === 'PLAYING' && benchLast) benchPlay += now - benchLast;
+      benchLast = now;
+      if (benchPlay >= BENCH * 1000) { at.finish(); return; }
+    }
     if (g.state === 'TITLE') {
       // snapstate=TITLE이면 타이틀이 그려진 뒤 첫 스냅샷을 찍고 시작한다
       if (sst === 'TITLE' && snapIdx < snaps.length) {
@@ -230,7 +237,7 @@
       if (sst === 'SETTINGS') LW.ui.act('settings');
     }
     // 연속 판 검사는 마지막 판의 결과 화면에서 끝낸다. 그 밖에는 목표 시각에 끝낸다.
-    if (ROUNDS === 0 && g.time >= at.endTime) at.finish();
+    if (ROUNDS === 0 && !BENCH && g.time >= at.endTime) at.finish();
   };
 
   // 프레임이 아니라 게임 시간 1스텝마다 호출(game.update에서)
@@ -256,6 +263,28 @@
   function r2(v) { return Math.round(v * 100) / 100; }
   function round(v, k) { var m = Math.pow(10, k); return Math.round(v * m) / m; }
 
+  // bench 통계: 프레임 간격(ms)의 평균, p50, p95, p99, 최대와 update, render 평균, 화질 변화
+  function benchStats(p) {
+    var f = LW.perf.benchFrames(), n = f ? f.length : 0;
+    var sorted = f ? Float32Array.from(f).sort() : [];
+    function pct(q) { return n ? round(sorted[Math.min(n - 1, Math.floor(n * q))], 2) : 0; }
+    var sum = 0;
+    for (var i = 0; i < n; i++) sum += f[i];
+    var mean = n ? sum / n : 0;
+    return {
+      seconds: BENCH, frames: n, playedMs: Math.round(benchPlay),
+      fps: mean ? round(1000 / mean, 1) : 0,
+      frameMeanMs: round(mean, 2), frameP50Ms: pct(0.5), frameP95Ms: pct(0.95), frameP99Ms: pct(0.99), frameMaxMs: n ? round(sorted[n - 1], 2) : 0,
+      over20ms: (function () { var c = 0; for (var j = 0; j < n; j++) if (f[j] > 20) c++; return c; })(),
+      updateMs: p.updN ? round(p.updSum / p.updN, 4) : 0,
+      renderMs: p.rndN ? round(p.rndSum / p.rndN, 4) : 0,
+      qualityStart: LW.quality.startName,
+      qualityEnd: LW.quality.name, qualityDrops: LW.quality.drops, dpr: LW.view.dprUsed,
+      maxEnemies: p.maxEnemies || 0, burnMs: LW.params.burn,
+      ua: navigator.userAgent
+    };
+  }
+
   at.finish = function (extraError) {
     if (at.done) return;
     at.done = true;
@@ -264,7 +293,7 @@
     var p = LW.perf || {};
     var res = {
       ok: at.errors.length === 0,
-      reached: ROUNDS > 0 ? roundsDone >= ROUNDS : (!!g.won || (g.time || 0) >= at.endTime - 1e-6),
+      reached: BENCH ? benchPlay >= BENCH * 1000 : (ROUNDS > 0 ? roundsDone >= ROUNDS : (!!g.won || (g.time || 0) >= at.endTime - 1e-6)),
       died: g.state === 'RESULT' && !g.won,
       errors: at.errors,
       gameTime: round(g.time || 0, 2),
@@ -299,14 +328,20 @@
       lastBossKilled: !!g.lastBossKilled,
       snaps: at.snapsTaken
     };
+    if (BENCH) res.bench = benchStats(p);
     var pre = document.createElement('pre');
     pre.id = 'autotest';
     pre.textContent = JSON.stringify(res);
     document.body.appendChild(pre);
+    if (BENCH) {
+      // 헤드리스에서 dump-dom을 기다리지 않도록 제목을 바꾸고, 결과를 개발 서버(tools/bench.sh)로 보낸다
+      document.title = 'BENCH_DONE';
+      try { fetch('/__bench', { method: 'POST', body: pre.textContent, keepalive: true }).catch(function () { /* 무시 */ }); } catch (e) { /* 무시 */ }
+    }
   };
 
   // 게임이 시작되지 못한 경우에도 JSON이 남도록 하는 감시 타이머
   setTimeout(function () {
     at.finish('watchdog: 게임 시간 ' + N + '초에 도달하지 못함');
-  }, N * 1500 + 8000);
+  }, BENCH ? N * 2000 + 30000 : N * 1500 + 8000);
 })();

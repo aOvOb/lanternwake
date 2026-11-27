@@ -18,6 +18,10 @@
   };
 
   var last = 0, acc = 0;
+  var BURN = LW.params.burn;
+  // bench: 프레임 간격(ms)을 미리 잡아 둔 배열에 기록한다(측정 중 할당 없음). 최대 240fps로 계산.
+  var benchDt = LW.params.bench > 0 ? new Float32Array(LW.params.bench * 240 + 600) : null, benchN = 0;
+  perf.benchFrames = function () { return benchDt ? benchDt.subarray(0, benchN) : null; };
 
   g.setState = function (s) {
     var prev = g.state;
@@ -149,7 +153,8 @@
 
   // 헤드리스의 가상 시간에서는 rAF가 거의 돌지 않으므로, 자동 검사 때만 타이머로 돌린다
   function schedule() {
-    if (LW.autotest.active) setTimeout(function () { frame(performance.now()); }, 16);
+    // bench는 실제 시간으로 재야 하므로 rAF를 쓴다
+    if (LW.autotest.active && !LW.params.bench) setTimeout(function () { frame(performance.now()); }, 16);
     else requestAnimationFrame(frame);
   }
 
@@ -178,7 +183,9 @@
     var t2 = performance.now();
     LW.input.endFrame();
 
+    if (BURN > 0) { var tb = performance.now(); while (performance.now() - tb < BURN) { /* 측정용 부하 */ } }
     if (g.state === 'PLAYING') {
+      if (benchDt && benchN < benchDt.length && g.time > LW.params.start + 2) benchDt[benchN++] = frameDt * 1000;   // 시작 직후 2초는 예열이라 뺀다
       perf.updLast = t1 - t0; perf.rndLast = t2 - t1;
       perf.updSum += perf.updLast; perf.updN++;
       perf.rndSum += perf.rndLast; perf.rndN++;

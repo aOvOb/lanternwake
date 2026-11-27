@@ -79,4 +79,6 @@
 - 리뷰 2 A5: S10에서 `g.lastBossKilled`(마지막 그림자 처치)로 "완전한 새벽"을 정하도록 이미 처리했다. `bossKilled`는 통계용으로만 남는다.
 - 리뷰 2 A6: 폭발 장판의 채우기와 테두리 색 문자열은 시작할 때 한 번만 만든다.
 - 리뷰 2 B6(메모, S22에서 처리): 서버는 승리 판의 `timeMs`가 정확히 900000(`winMs`)이어야 통과시킨다. 게임은 `g.time += 1/60`을 누적해 승리 프레임의 시각이 900을 조금 넘을 수 있으므로, 제출하는 클라이언트는 승리 판의 `timeMs`를 `Math.round(g.time * 1000)`이 아니라 `LW.WIN_TIME * 1000`으로 고정해야 한다. 완전한 새벽(`fullDawn`)은 `g.lastBossKilled`로 정한다(리뷰 2 A5).
-
+- S12 동적 화질: `LW.quality.sample`이 PLAYING 프레임의 간격을 3초 창으로 모아 평균이 19ms를 넘으면 한 단계 내리고 `platform.resize()`로 백버퍼와 스프라이트 캐시를 새 DPR로 다시 만든다. 창은 단계를 바꿀 때 비우므로 직후 3초도 판정하지 않는다. 올리는 경로는 없고 새 판의 `reset`에서 첫 단계로 돌아간다. 설정이 높음 또는 낮음이면 고정이고 `auto`일 때만 내린다. 금지 API 점검(shadowBlur, filter, 프레임마다 그라데이션, 프레임 중 ctx.font 반복 변경)은 grep으로 확인했고 해당 사용이 없다(그라데이션 3개는 시작 때 한 번 만드는 글로우, 비네트). 상자 창의 결과 목록은 칸 3개를 재사용한다(`LW.chest.n`).
+- S12 실시간 측정 `?bench=초`: 자동 검사 장치를 rAF 루프로 돌리고, 지정하지 않으면 `start=780&god=1&build=all`이 기본이다. `burn=ms`는 프레임마다 바쁜 루프로 부하를 주고, `ql=0|1|2`는 화질 단계를 고정한다. 끝나면 `document.title`을 `BENCH_DONE`으로 바꾸고 결과 JSON을 `POST /__bench`로 보낸다. `tools/bench.sh`가 그것을 받는 작은 서버와 Chrome을 띄워 출력하고 Chrome을 끈다(`--virtual-time-budget` 없음, CDP 없음). 프레임 간격은 PLAYING 상태에서 시작 2초 뒤부터 미리 잡은 Float32Array에 기록해 평균, p50, p95, p99, 최대를 낸다. 측정 시간은 PLAYING으로 흐른 실제 시간이다(레벨업 창 시간은 뺀다).
+- S12 측정의 한계: 헤드리스 Chrome은 `--disable-gpu`라서 캔버스 래스터가 CPU로 돌고, JS가 재는 update와 render 시간에는 래스터 비용이 들어가지 않는다. DPR 2에서 JS 시간은 같은데도 프레임 간격만 늘어난다(실측 아래). 실기기의 58fps 기준은 휴대폰에서 `?debug=1` 오버레이로 확인해야 한다. CPU 4배 감속 측정은 CDP가 없어 못 했고, JS 합계에 4를 곱한 값으로 추정한다.

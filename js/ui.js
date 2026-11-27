@@ -504,7 +504,7 @@
 
   // 상자 창: 결과 목록. 탭이나 Enter로 닫는다.
   function drawChest(ctx) {
-    var ch = LW.chest, v = LW.view, res = ch.results, n = res.length;
+    var ch = LW.chest, v = LW.view, res = ch.results, n = ch.n;
     dim(ctx, 0.7);
     var rowH = 46, cw = Math.min(v.w - 32, 400);
     var h = 70 + n * rowH + 40, x = (v.w - cw) / 2, y = v.h / 2 - h / 2;
