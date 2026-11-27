@@ -143,13 +143,14 @@
         if (dot > 0) score[k] += dot * f;
       }
     }
-    // 상자는 진화에 필요하므로 크게, 기름은 HP가 모자랄 때, 끌개 종과 정화의 빛은 조금
+    // 상자는 진화에 필요하므로 크게, 기름은 HP가 모자랄 때, 끌개 종과 정화의 빛은 조금.
+    // 촛대는 부서지면 기름(60%)이 나오므로 HP가 모자랄 때 찾아간다(무강화 봇은 불씨 화살로 부수기 어려워 제외).
     items = LW.pickups.items; n = LW.pickups.n;
     var K = LW.PK, low = P.hp < P.maxHp * 0.7;
     for (i = 0; i < n; i++) {
       var pk = items[i];
       if (!pk.active) continue;
-      var kw = pk.kind === K.CHEST || pk.kind === K.BOSS_CHEST ? 4 : (pk.kind === K.OIL ? (low ? 3 : 0.5) : (pk.kind === K.BELL ? 1.5 : (pk.kind === K.LIGHT ? 2 : 0)));
+      var kw = pk.kind === K.CHEST || pk.kind === K.BOSS_CHEST ? 4 : (pk.kind === K.OIL ? (low ? 3 : 0.5) : (pk.kind === K.BELL ? 1.5 : (pk.kind === K.LIGHT ? 2 : (pk.kind === K.CANDLE && !NAIVE ? (low ? 2.5 : 0.8) : 0))));
       if (!kw) continue;
       dx = pk.x - P.x; dy = pk.y - P.y; d = Math.sqrt(dx * dx + dy * dy);
       if (d > 700 || d < 1) continue;
@@ -174,7 +175,7 @@
       }
     }
 
-    // 4) 예고 원: 터지는 시각의 위치가 원 안이면 크게 감점
+    // 4) 예고 원: 터지는 시각의 위치가 원 안이면 크게 감점(군중을 뚫고 나가는 접촉 피해보다 확실한 큰 피해이므로 밀도 감점보다 훨씬 크게)
     items = LW.areas.items; n = LW.areas.n;
     for (i = 0; i < n; i++) {
       var a = items[i];
@@ -182,7 +183,7 @@
       var life = a.life + 0.05, rr = a.r + P.r * 0.5 + 4;
       for (k = 0; k < NDIR; k++) {
         var tx = P.x + COS[k] * sp * life - a.x, ty = P.y + SIN[k] * sp * life - a.y;
-        if (tx * tx + ty * ty < rr * rr) score[k] -= 14;
+        if (tx * tx + ty * ty < rr * rr) score[k] -= 60;
       }
     }
 
@@ -199,7 +200,7 @@
           var run = t2 - warn;
           if (run < 0) run = 0; else if (run > dashLeft) run = dashLeft;
           var hx = e.x + e.ax * dsp * run - (P.x + COS[k] * sp * t2), hy = e.y + e.ay * dsp * run - (P.y + SIN[k] * sp * t2);
-          if (hx * hx + hy * hy < hr * hr) { score[k] -= 12 * (1.5 - t2 * 0.5); break; }
+          if (hx * hx + hy * hy < hr * hr) { score[k] -= 40 * (1.5 - t2 * 0.5); break; }
         }
       }
     }
