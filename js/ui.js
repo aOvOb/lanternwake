@@ -940,6 +940,7 @@
       for (i = first; i <= last; i++) text(ctx, rows[i].sub, cx + cw - 82, top + i * ROW_H - rank.scroll + ROW_H / 2 - 1, 11, rows[i].dawn ? '#ffe9a8' : '#9fb2b8', 'right', 'normal');
       for (i = first; i <= last; i++) text(ctx, rows[i].val, cx + cw - 10, top + i * ROW_H - rank.scroll + ROW_H / 2 - 1, 15, '#ffd34d', 'right');
       ctx.restore();
+      curFont = '';             // restore 가 ctx.font 를 되돌렸으니 text() 의 글꼴 기억도 지운다
     }
     // 내 순위 고정 줄. 게스트는 로그인 안내.
     var mine = A.loggedIn && b.hasMe;
